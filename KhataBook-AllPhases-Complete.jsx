@@ -4,6 +4,14 @@ import jsPDF from 'jspdf';
 import * as XLSX from 'xlsx';
 import { BarChart3, Package, FileText, DollarSign, Home, Settings, LogOut, Menu, X, Plus, Trash2, Edit2, AlertCircle, Download, Search, CheckCircle, Clock, Users, TrendingUp, Eye, Trash, Repeat2, Tag, Bell, Smartphone, Lock, BarChart2, PieChart, LineChart, ShoppingCart, Printer, File, ArrowRight, Target, Zap, AlertTriangle, CreditCard, Calendar } from 'lucide-react';
 
+const getPaymentTermDays = (paymentTerms) => (
+  paymentTerms === 'Cash' ? 0 : parseInt(paymentTerms?.split(' ')[1], 10) || 30
+);
+
+const hasValidLineItems = (items) => items.some(
+  (item) => item.name.trim() && item.qty > 0 && item.price >= 0,
+);
+
 // ============ SMART DASHBOARD ============
 const LegacyDashboardComponent = ({ data }) => {
   const totalRevenue = data.invoices.reduce((sum, inv) => sum + inv.total, 0);
@@ -156,7 +164,7 @@ const LegacyInventoryComponent = ({ onConvertToReorder }) => {
         <div className="bg-white p-4 rounded-lg border border-slate-200"><p className="text-slate-600 text-sm">Total Items</p><p className="text-2xl font-bold text-blue-600">{inventory.length}</p></div>
         <div className="bg-white p-4 rounded-lg border border-slate-200"><p className="text-slate-600 text-sm">Total Value</p><p className="text-2xl font-bold text-green-600">₹{(totalInventoryValue / 100000).toFixed(1)}L</p></div>
         <div className={`bg-white p-4 rounded-lg border ${lowStockItems.length > 0 ? 'border-red-300 bg-red-50' : 'border-slate-200'}`}><p className="text-slate-600 text-sm">Low Stock</p><p className={`text-2xl font-bold ${lowStockItems.length > 0 ? 'text-red-600' : 'text-green-600'}`}>{lowStockItems.length}</p></div>
-        <div className="bg-white p-4 rounded-lg border border-slate-200"><p className="text-slate-600 text-sm">Avg Unit Price</p><p className="text-2xl font-bold text-purple-600">₹{Math.round(totalInventoryValue / inventory.length).toLocaleString()}</p></div>
+        <div className="bg-white p-4 rounded-lg border border-slate-200"><p className="text-slate-600 text-sm">Avg Unit Price</p><p className="text-2xl font-bold text-purple-600">₹{(inventory.length ? Math.round(totalInventoryValue / inventory.length) : 0).toLocaleString()}</p></div>
       </div>
 
       {lowStockItems.length > 0 && (
@@ -262,7 +270,7 @@ const LegacyInvoiceComponent = ({ newQuoteData }) => {
   React.useEffect(() => {
     if (newQuoteData) {
       const dueDate = new Date();
-      const termDays = parseInt(formData.paymentTerms.split(' ')[1]) || 30;
+      const termDays = getPaymentTermDays(formData.paymentTerms);
       dueDate.setDate(dueDate.getDate() + termDays);
 
       setInvoices([...invoices, {
@@ -285,12 +293,16 @@ const LegacyInvoiceComponent = ({ newQuoteData }) => {
 
   const handleAddInvoice = (e) => {
     e.preventDefault();
+    if (!hasValidLineItems(formData.items)) {
+      alert('Add at least one item with a name and a quantity greater than zero.');
+      return;
+    }
     const subtotal = formData.items.reduce((sum, item) => sum + (item.qty * item.price), 0);
     const gstAmount = Math.round(subtotal * 0.18);
     const total = subtotal + gstAmount;
 
     const dueDate = new Date();
-    const termDays = parseInt(formData.paymentTerms.split(' ')[1]) || 30;
+    const termDays = getPaymentTermDays(formData.paymentTerms);
     dueDate.setDate(dueDate.getDate() + termDays);
 
     setInvoices([...invoices, { 
@@ -569,7 +581,7 @@ const InventoryComponent = ({ onConvertToReorder }) => {
         <div className="bg-white p-4 rounded-lg border border-slate-200"><p className="text-slate-600 text-sm">Total Items</p><p className="text-2xl font-bold text-blue-600">{inventory.length}</p></div>
         <div className="bg-white p-4 rounded-lg border border-slate-200"><p className="text-slate-600 text-sm">Total Value</p><p className="text-2xl font-bold text-green-600">₹{(totalInventoryValue / 100000).toFixed(1)}L</p></div>
         <div className={`bg-white p-4 rounded-lg border ${lowStockItems.length > 0 ? 'border-red-300 bg-red-50' : 'border-slate-200'}`}><p className="text-slate-600 text-sm">Low Stock</p><p className={`text-2xl font-bold ${lowStockItems.length > 0 ? 'text-red-600' : 'text-green-600'}`}>{lowStockItems.length}</p></div>
-        <div className="bg-white p-4 rounded-lg border border-slate-200"><p className="text-slate-600 text-sm">Avg Unit Price</p><p className="text-2xl font-bold text-purple-600">₹{Math.round(totalInventoryValue / inventory.length).toLocaleString()}</p></div>
+        <div className="bg-white p-4 rounded-lg border border-slate-200"><p className="text-slate-600 text-sm">Avg Unit Price</p><p className="text-2xl font-bold text-purple-600">₹{(inventory.length ? Math.round(totalInventoryValue / inventory.length) : 0).toLocaleString()}</p></div>
       </div>
 
       {lowStockItems.length > 0 && (
@@ -609,7 +621,11 @@ const QuotationComponent = ({ onConvertToInvoice }) => {
 
   const handleAddQuotation = (e) => {
     e.preventDefault();
-    const subtotal = formData.items.reduce((sum, item) => sum + (item.qty * item.price), 0);
+      if (!hasValidLineItems(formData.items)) {
+        alert('Add at least one item with a name and a quantity greater than zero.');
+        return;
+      }
+      const subtotal = formData.items.reduce((sum, item) => sum + (item.qty * item.price), 0);
     const gstAmount = Math.round(subtotal * 0.18);
     const total = subtotal + gstAmount;
 
@@ -670,15 +686,18 @@ const InvoiceComponent = ({ newQuoteData }) => {
 
   const [showForm, setShowForm] = useState(false);
   const [formData, setFormData] = useState({ invoiceNo: '', customer: '', items: [{ name: '', qty: 0, price: 0 }], paymentTerms: 'NET 30', notes: '' });
+  const processedQuoteId = useRef(null);
 
   // Auto-populate from quote
   React.useEffect(() => {
-    if (newQuoteData) {
+    const quoteId = newQuoteData?.id ?? newQuoteData?.quoteNo;
+    if (newQuoteData && processedQuoteId.current !== quoteId) {
+      processedQuoteId.current = quoteId;
       const dueDate = new Date();
-      const termDays = parseInt(formData.paymentTerms.split(' ')[1]) || 30;
+      const termDays = getPaymentTermDays(formData.paymentTerms);
       dueDate.setDate(dueDate.getDate() + termDays);
 
-      setInvoices([...invoices, {
+      setInvoices((currentInvoices) => [...currentInvoices, {
         invoiceNo: `INV-${Date.now()}`,
         customer: newQuoteData.customer,
         items: newQuoteData.items,
@@ -698,12 +717,16 @@ const InvoiceComponent = ({ newQuoteData }) => {
 
   const handleAddInvoice = (e) => {
     e.preventDefault();
+    if (!hasValidLineItems(formData.items)) {
+      alert('Add at least one item with a name and a quantity greater than zero.');
+      return;
+    }
     const subtotal = formData.items.reduce((sum, item) => sum + (item.qty * item.price), 0);
     const gstAmount = Math.round(subtotal * 0.18);
     const total = subtotal + gstAmount;
 
     const dueDate = new Date();
-    const termDays = parseInt(formData.paymentTerms.split(' ')[1]) || 30;
+    const termDays = getPaymentTermDays(formData.paymentTerms);
     dueDate.setDate(dueDate.getDate() + termDays);
 
     setInvoices([...invoices, { 
