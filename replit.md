@@ -1,4 +1,4 @@
-# KhataBook Complete Edition
+# Apna Dhandha Complete Edition
 
 ## Run the app
 
@@ -18,6 +18,6 @@ npm run build
 
 ## Project notes
 
-- The main dashboard UI remains in `KhataBook-AllPhases-Complete.jsx`.
+- The main dashboard UI remains in `ApnaDhandha-AllPhases-Complete.jsx`.
 - Demo data is held in component state and resets when the page is refreshed.
 - The app currently has no backend, authentication, database, or external messaging integrations.
