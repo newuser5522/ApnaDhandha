@@ -2,22 +2,30 @@
 
 ## Run the app
 
-The project is a Vite + React app. The Replit workflow runs:
+The project is a React app with a self-hosted Node API. The Replit workflow runs:
 
 ```bash
 npm run dev
 ```
 
-The development server listens on port `5000` and allows Replit's preview proxy hosts.
+This starts the authentication API on port `3001` and Vite on port `5000`.
+Vite proxies `/api` requests to the local API. Configure the secrets from
+`.env.example` in Replit Secrets before first use.
 
 ## Build for production
 
 ```bash
 npm run build
+npm start
 ```
+
+The production Node server serves the Vite build and authenticated API on the
+same port. The SQLite database file is stored under `data/`; configure a
+persistent Replit volume for production deployments.
 
 ## Project notes
 
-- The main dashboard UI remains in `ApnaDhandha-AllPhases-Complete.jsx`.
-- Demo data is held in component state and resets when the page is refreshed.
-- The app currently has no backend, authentication, database, or external messaging integrations.
+- User credentials are hashed on the server and sessions use HTTP-only cookies.
+- Initial administrator setup requires `BOOTSTRAP_ADMIN_TOKEN`.
+- Team invitations are one-time links that expire after seven days; invite links
+  must currently be shared manually.

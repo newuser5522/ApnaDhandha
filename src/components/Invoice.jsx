@@ -1,5 +1,4 @@
 import { useState } from "react";
-import jsPDF from "jspdf";
 import React from "react";
 import {
   calculateTaxTotals,
@@ -9,22 +8,57 @@ import {
   hasValidLineItems,
 } from "../utils/invoices.js";
 import LineItemsEditor from "./LineItemsEditor.jsx";
-import { Plus, Download, Trash, CreditCard } from "lucide-react";
+import DocumentDetailsEditor from "./DocumentDetailsEditor.jsx";
+import { downloadDocumentPdf } from "../utils/documentPdf.js";
+import { Plus, Download, Trash, CreditCard, Pencil } from "lucide-react";
+
+const getDateAfterDays = (days) => {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  return date.toISOString().split("T")[0];
+};
+
+const createEmptyInvoiceForm = () => ({
+  invoiceNo: "",
+  customer: "",
+  customerAddress: "",
+  customerGstin: "",
+  customerState: "",
+  customerPhone: "",
+  shippingAddress: "",
+  businessName: "",
+  businessAddress: "",
+  businessGstin: "",
+  businessPan: "",
+  businessState: "",
+  businessPhone: "",
+  businessEmail: "",
+  placeOfSupply: "",
+  purchaseOrderRef: "",
+  reverseCharge: "No",
+  bankAccountName: "",
+  bankName: "",
+  bankAccountNumber: "",
+  bankIfsc: "",
+  upiId: "",
+  termsConditions: "",
+  items: [{ name: "", hsnSac: "", unit: "", qty: "", price: "", gstRate: "" }],
+  paymentTerms: "NET 30",
+  notes: "",
+  date: new Date().toISOString().split("T")[0],
+  dueDate: getDateAfterDays(30),
+});
 
 const InvoiceComponent = ({
   invoices,
   setInvoices,
   newQuoteData,
   inventory = [],
+  readOnly = false,
 }) => {
   const [showForm, setShowForm] = useState(false);
-  const [formData, setFormData] = useState({
-    invoiceNo: "",
-    customer: "",
-    items: [{ name: "", qty: 0, price: 0, gstRate: 18 }],
-    paymentTerms: "NET 30",
-    notes: "",
-  });
+  const [formData, setFormData] = useState(createEmptyInvoiceForm);
+  const [editingInvoiceId, setEditingInvoiceId] = useState(null);
   const [paymentForm, setPaymentForm] = useState(null);
 
   React.useEffect(() => {
@@ -44,7 +78,7 @@ const InvoiceComponent = ({
         paymentStatus: "pending",
         amountPaid: 0,
         paymentTerms: "NET 30",
-        dueDate: dueDate.toISOString().split("T")[0],
+        dueDate: newQuoteData.dueDate || dueDate.toISOString().split("T")[0],
         notes: newQuoteData.notes || "Converted from quotation",
         id: Date.now(),
       };
@@ -61,69 +95,90 @@ const InvoiceComponent = ({
       );
       return;
     }
-    const { subtotal, gstAmount, total } = calculateTaxTotals(formData.items);
+    const items = formData.items.map((item) => ({
+      ...item,
+      qty: Number(item.qty) || 0,
+      price: Number(item.price) || 0,
+      gstRate: getItemGstRate(item),
+    }));
+    const { subtotal, gstAmount, total } = calculateTaxTotals(items);
 
-    const dueDate = new Date();
-    const termDays = getPaymentTermDays(formData.paymentTerms);
-    dueDate.setDate(dueDate.getDate() + termDays);
+    const dueDate =
+      formData.dueDate ||
+      getDateAfterDays(getPaymentTermDays(formData.paymentTerms));
+    const date = formData.date || new Date().toISOString().split("T")[0];
+    const savedDocument = {
+      ...formData,
+      items,
+      subtotal,
+      gstAmount,
+      total,
+      date,
+      dueDate,
+    };
 
-    setInvoices([
-      ...invoices,
-      {
-        ...formData,
-        id: Date.now(),
-        subtotal,
-        gstAmount,
-        total,
-        date: new Date().toISOString().split("T")[0],
-        dueDate: dueDate.toISOString().split("T")[0],
-        paymentStatus: "pending",
-        amountPaid: 0,
-      },
-    ]);
-    setFormData({
-      invoiceNo: "",
-      customer: "",
-      items: [{ name: "", qty: 0, price: 0, gstRate: 18 }],
-      paymentTerms: "NET 30",
-      notes: "",
-    });
+    if (editingInvoiceId !== null) {
+      const existingInvoice = invoices.find(
+        (invoice) => invoice.id === editingInvoiceId,
+      );
+      if (Number(existingInvoice?.amountPaid || 0) > total) {
+        alert("The invoice total cannot be less than the amount already paid.");
+        return;
+      }
+      setInvoices((currentInvoices) =>
+        currentInvoices.map((invoice) => {
+          if (invoice.id !== editingInvoiceId) return invoice;
+          const amountPaid = Number(invoice.amountPaid || 0);
+          return {
+            ...invoice,
+            ...savedDocument,
+            amountPaid,
+            paymentStatus:
+              amountPaid === 0
+                ? "pending"
+                : amountPaid >= total
+                  ? "paid"
+                  : "partial",
+          };
+        }),
+      );
+    } else {
+      setInvoices((currentInvoices) => [
+        ...currentInvoices,
+        {
+          ...savedDocument,
+          id: Date.now(),
+          paymentStatus: "pending",
+          amountPaid: 0,
+        },
+      ]);
+    }
+    setFormData(createEmptyInvoiceForm());
+    setEditingInvoiceId(null);
     setShowForm(false);
   };
 
   const generatePDF = (invoice) => {
-    const pdf = new jsPDF();
-    pdf.setFontSize(16);
-    pdf.text("INVOICE", 20, 20);
-    pdf.setFontSize(10);
-    pdf.text(`Invoice #: ${invoice.invoiceNo}`, 20, 30);
-    pdf.text(`Customer: ${invoice.customer}`, 20, 40);
-    pdf.text(`Date: ${invoice.date} | Due: ${invoice.dueDate}`, 20, 50);
-    pdf.text(`Terms: ${invoice.paymentTerms}`, 20, 60);
+    downloadDocumentPdf(invoice, "invoice");
+  };
 
-    let yPos = 75;
-    invoice.items.forEach((item) => {
-      pdf.text(
-        `${item.name} - Qty: ${item.qty} @ ₹${item.price} - GST ${getItemGstRate(item)}%`,
-        20,
-        yPos,
-      );
-      yPos += 10;
+  const startEditingInvoice = (invoice) => {
+    setEditingInvoiceId(invoice.id);
+    setFormData({
+      ...createEmptyInvoiceForm(),
+      ...invoice,
+      items: (invoice.items || []).map((item) => ({
+        ...item,
+        qty: item.qty ?? "",
+        price: item.price ?? "",
+        gstRate: item.gstRate ?? "",
+      })),
     });
+    setShowForm(true);
+  };
 
-    pdf.text(`Subtotal: ₹${invoice.subtotal}`, 20, yPos);
-    pdf.text(`GST (per item slab): ₹${invoice.gstAmount}`, 20, yPos + 10);
-    pdf.text(`TOTAL: ₹${invoice.total}`, 20, yPos + 20, {
-      fontSize: 12,
-      fontStyle: "bold",
-    });
-    pdf.text(
-      `Paid: ₹${invoice.amountPaid} | Outstanding: ₹${invoice.total - invoice.amountPaid}`,
-      20,
-      yPos + 30,
-    );
-
-    pdf.save(`Invoice-${invoice.invoiceNo}.pdf`);
+  const updateFormField = (name, value) => {
+    setFormData((current) => ({ ...current, [name]: value }));
   };
 
   const openPaymentForm = (invoice) => {
@@ -223,62 +278,88 @@ const InvoiceComponent = ({
         </div>
       </div>
 
-      <div className="flex gap-4">
-        <button
-          onClick={() => setShowForm(!showForm)}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-        >
-          <Plus size={18} />
-          New Invoice
-        </button>
-      </div>
+      {!readOnly && (
+        <div className="flex gap-4">
+          <button
+            onClick={() => {
+              setEditingInvoiceId(null);
+              setFormData(createEmptyInvoiceForm());
+              setShowForm((current) => !current);
+            }}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+          >
+            <Plus size={18} />
+            New Invoice
+          </button>
+        </div>
+      )}
 
       {showForm && (
         <div className="bg-white p-6 rounded-lg border border-slate-200">
-          <h3 className="text-xl font-bold mb-4">Create Invoice</h3>
+          <h3 className="text-xl font-bold mb-4">
+            {editingInvoiceId === null ? "Create Invoice" : "Edit Invoice"}
+          </h3>
           <form onSubmit={handleAddInvoice} className="space-y-4">
-            <div className="grid grid-cols-3 gap-4">
-              <input
-                type="text"
-                placeholder="Invoice No."
-                value={formData.invoiceNo}
-                onChange={(e) =>
-                  setFormData({ ...formData, invoiceNo: e.target.value })
-                }
-                required
-                className="px-3 py-2 border border-slate-300 rounded-lg"
-              />
-              <input
-                type="text"
-                placeholder="Customer Name"
-                value={formData.customer}
-                onChange={(e) =>
-                  setFormData({ ...formData, customer: e.target.value })
-                }
-                required
-                className="px-3 py-2 border border-slate-300 rounded-lg"
-              />
-              <select
-                value={formData.paymentTerms}
-                onChange={(e) =>
-                  setFormData({ ...formData, paymentTerms: e.target.value })
-                }
-                className="px-3 py-2 border border-slate-300 rounded-lg"
-              >
-                <option value="Cash">Cash on Delivery</option>
-                <option value="NET 15">NET 15</option>
-                <option value="NET 30">NET 30</option>
-                <option value="NET 45">NET 45</option>
-              </select>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <label className="space-y-1 text-sm">
+                <span>Invoice number</span>
+                <input
+                  type="text"
+                  aria-label="Invoice number"
+                  placeholder="Invoice number"
+                  value={formData.invoiceNo}
+                  onChange={(event) =>
+                    updateFormField("invoiceNo", event.target.value)
+                  }
+                  required
+                  className="w-full rounded-md border border-slate-300 px-3 py-2"
+                />
+              </label>
+              <label className="space-y-1 text-sm">
+                <span>Invoice date</span>
+                <input
+                  type="date"
+                  aria-label="Invoice date"
+                  value={formData.date || ""}
+                  onChange={(event) =>
+                    updateFormField("date", event.target.value)
+                  }
+                  className="w-full rounded-md border border-slate-300 px-3 py-2"
+                />
+              </label>
+              <label className="space-y-1 text-sm">
+                <span>Due date</span>
+                <input
+                  type="date"
+                  aria-label="Due date"
+                  value={formData.dueDate || ""}
+                  onChange={(event) =>
+                    updateFormField("dueDate", event.target.value)
+                  }
+                  className="w-full rounded-md border border-slate-300 px-3 py-2"
+                />
+              </label>
+              <label className="space-y-1 text-sm">
+                <span>Payment terms</span>
+                <select
+                  aria-label="Payment terms"
+                  value={formData.paymentTerms}
+                  onChange={(event) =>
+                    updateFormField("paymentTerms", event.target.value)
+                  }
+                  className="w-full rounded-md border border-slate-300 px-3 py-2"
+                >
+                  <option value="Cash">Cash on Delivery</option>
+                  <option value="NET 15">NET 15</option>
+                  <option value="NET 30">NET 30</option>
+                  <option value="NET 45">NET 45</option>
+                </select>
+              </label>
             </div>
-            <textarea
-              placeholder="Notes/Terms"
-              value={formData.notes}
-              onChange={(e) =>
-                setFormData({ ...formData, notes: e.target.value })
-              }
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg"
-            ></textarea>
+            <DocumentDetailsEditor
+              formData={formData}
+              onChange={updateFormField}
+            />
             <LineItemsEditor
               items={formData.items}
               setItems={(nextItems) =>
@@ -298,11 +379,15 @@ const InvoiceComponent = ({
                 type="submit"
                 className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg"
               >
-                Create Invoice
+                {editingInvoiceId === null ? "Create Invoice" : "Save Invoice"}
               </button>
               <button
                 type="button"
-                onClick={() => setShowForm(false)}
+                onClick={() => {
+                  setShowForm(false);
+                  setEditingInvoiceId(null);
+                  setFormData(createEmptyInvoiceForm());
+                }}
                 className="flex-1 px-4 py-2 bg-slate-300 rounded-lg"
               >
                 Cancel
@@ -345,13 +430,22 @@ const InvoiceComponent = ({
             <div className="grid grid-cols-2 gap-4 mb-3">
               <div>
                 <p className="text-sm text-slate-600">
-                  Subtotal: ₹{invoice.subtotal.toLocaleString()}
+                  Subtotal: ₹
+                  {Number(invoice.subtotal || 0).toLocaleString("en-IN", {
+                    minimumFractionDigits: 2,
+                  })}
                 </p>
                 <p className="text-sm text-slate-600">
-                  GST (per item slab): ₹{invoice.gstAmount.toLocaleString()}
+                  GST: ₹
+                  {Number(invoice.gstAmount || 0).toLocaleString("en-IN", {
+                    minimumFractionDigits: 2,
+                  })}
                 </p>
                 <p className="text-lg font-bold text-blue-600">
-                  Total: ₹{invoice.total.toLocaleString()}
+                  Total: ₹
+                  {Number(invoice.total || 0).toLocaleString("en-IN", {
+                    minimumFractionDigits: 2,
+                  })}
                 </p>
               </div>
               <div>
@@ -383,7 +477,7 @@ const InvoiceComponent = ({
                 </ul>
               </div>
             )}
-            {paymentForm?.invoiceId === invoice.id && (
+            {!readOnly && paymentForm?.invoiceId === invoice.id && (
               <form
                 onSubmit={(event) => handleRecordPayment(event, invoice)}
                 className="mb-3 space-y-3 rounded-lg border border-blue-200 bg-blue-50 p-4"
@@ -482,22 +576,35 @@ const InvoiceComponent = ({
                 <Download size={16} />
                 PDF
               </button>
-              <button
-                onClick={() => openPaymentForm(invoice)}
-                disabled={getInvoiceOutstanding(invoice) === 0}
-                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <CreditCard size={16} />
-                Record Payment
-              </button>
-              <button
-                onClick={() =>
-                  setInvoices(invoices.filter((i) => i.id !== invoice.id))
-                }
-                className="px-4 py-2 bg-red-100 text-red-600 rounded-lg"
-              >
-                <Trash size={16} />
-              </button>
+              {!readOnly && (
+                <>
+                  <button
+                    onClick={() => startEditingInvoice(invoice)}
+                    className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-slate-100 px-4 py-2 hover:bg-slate-200"
+                  >
+                    <Pencil size={16} /> Edit
+                  </button>
+                  <button
+                    onClick={() => openPaymentForm(invoice)}
+                    disabled={getInvoiceOutstanding(invoice) === 0}
+                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <CreditCard size={16} />
+                    Record Payment
+                  </button>
+                  <button
+                    onClick={() =>
+                      setInvoices(
+                        invoices.filter((item) => item.id !== invoice.id),
+                      )
+                    }
+                    aria-label={`Delete invoice ${invoice.invoiceNo}`}
+                    className="px-4 py-2 bg-red-100 text-red-600 rounded-lg"
+                  >
+                    <Trash size={16} />
+                  </button>
+                </>
+              )}
             </div>
           </div>
         ))}

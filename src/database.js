@@ -42,25 +42,80 @@ const writeCollection = async (key, value) => {
 export function useDatabaseCollection(key, initialValue) {
   const [value, setValue] = useState(initialValue);
   const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     let mounted = true;
-    readCollection(key)
-      .then((storedValue) => {
-        if (mounted && storedValue !== undefined) setValue(storedValue);
-        if (mounted) setLoaded(true);
-      })
-      .catch(() => {
-        if (mounted) setLoaded(true);
-      });
+
+    const loadCollection = async () => {
+      try {
+        const response = await fetch(`/api/data/${encodeURIComponent(key)}`, {
+          credentials: "same-origin",
+        });
+        if (!response.ok) throw new Error("Unable to load business data.");
+
+        const result = await response.json();
+        let nextValue = result.value;
+        if (nextValue === null) {
+          const localValue = await readCollection(key).catch(() => undefined);
+          nextValue = localValue === undefined ? initialValue : localValue;
+
+          if (localValue !== undefined) {
+            const migrationResponse = await fetch(
+              `/api/data/${encodeURIComponent(key)}`,
+              {
+                method: "PUT",
+                credentials: "same-origin",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ value: localValue }),
+              },
+            );
+            if (!migrationResponse.ok) {
+              throw new Error("Could not migrate existing browser data.");
+            }
+          }
+        }
+
+        if (mounted) {
+          setValue(nextValue);
+          setLoaded(true);
+          setError("");
+        }
+      } catch (loadError) {
+        if (mounted) {
+          setError(loadError.message);
+          setLoaded(true);
+        }
+      }
+    };
+
+    loadCollection();
     return () => {
       mounted = false;
     };
   }, [key]);
 
   useEffect(() => {
-    if (loaded) writeCollection(key, value).catch(() => {});
-  }, [key, value, loaded]);
+    if (!loaded || error) return undefined;
 
-  return [value, setValue];
+    let mounted = true;
+    fetch(`/api/data/${encodeURIComponent(key)}`, {
+      method: "PUT",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ value }),
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error("Unable to save business data.");
+      })
+      .catch((writeError) => {
+        if (mounted) setError(writeError.message);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [key, value, loaded, error]);
+
+  return [value, setValue, loaded, error];
 }

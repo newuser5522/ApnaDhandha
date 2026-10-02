@@ -1,135 +1,202 @@
 import { useState } from "react";
-import jsPDF from "jspdf";
-import { useDatabaseCollection } from "../database.js";
 import {
   calculateTaxTotals,
   getItemGstRate,
   hasValidLineItems,
 } from "../utils/invoices.js";
 import LineItemsEditor from "./LineItemsEditor.jsx";
-import { Plus, Download, Trash, ArrowRight } from "lucide-react";
+import DocumentDetailsEditor from "./DocumentDetailsEditor.jsx";
+import { downloadDocumentPdf } from "../utils/documentPdf.js";
+import { ArrowRight, Download, Plus, Trash, Pencil } from "lucide-react";
 
-const QuotationComponent = ({ onConvertToInvoice, inventory = [] }) => {
-  const [quotations, setQuotations] = useDatabaseCollection("quotations", []);
+const getDateAfterDays = (days) => {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  return date.toISOString().split("T")[0];
+};
 
+const createEmptyQuotationForm = () => ({
+  quoteNo: "",
+  customer: "",
+  customerAddress: "",
+  customerGstin: "",
+  customerState: "",
+  customerPhone: "",
+  shippingAddress: "",
+  businessName: "",
+  businessAddress: "",
+  businessGstin: "",
+  businessPan: "",
+  businessState: "",
+  businessPhone: "",
+  businessEmail: "",
+  placeOfSupply: "",
+  purchaseOrderRef: "",
+  reverseCharge: "No",
+  bankAccountName: "",
+  bankName: "",
+  bankAccountNumber: "",
+  bankIfsc: "",
+  upiId: "",
+  termsConditions: "",
+  items: [{ name: "", hsnSac: "", unit: "", qty: "", price: "", gstRate: "" }],
+  notes: "",
+  date: new Date().toISOString().split("T")[0],
+  validTill: getDateAfterDays(30),
+});
+
+const QuotationComponent = ({
+  onConvertToInvoice,
+  inventory = [],
+  quotations = [],
+  setQuotations,
+  readOnly = false,
+}) => {
   const [showForm, setShowForm] = useState(false);
-  const [formData, setFormData] = useState({
-    quoteNo: "",
-    customer: "",
-    items: [{ name: "", qty: 0, price: 0, gstRate: 18 }],
-    notes: "",
-  });
+  const [formData, setFormData] = useState(createEmptyQuotationForm);
+  const [editingQuotationId, setEditingQuotationId] = useState(null);
 
   const handleAddQuotation = (e) => {
     e.preventDefault();
+
     if (!hasValidLineItems(formData.items)) {
       alert(
         "Add at least one item with a name and a quantity greater than zero.",
       );
       return;
     }
-    const { subtotal, gstAmount, total } = calculateTaxTotals(formData.items);
 
-    setQuotations([
-      ...quotations,
-      {
-        ...formData,
-        id: Date.now(),
-        subtotal,
-        gstAmount,
-        total,
-        date: new Date().toISOString().split("T")[0],
-        validTill: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
-          .toISOString()
-          .split("T")[0],
-        status: "draft",
-      },
-    ]);
-    setFormData({
-      quoteNo: "",
-      customer: "",
-      items: [{ name: "", qty: 0, price: 0, gstRate: 18 }],
-      notes: "",
-    });
+    const items = formData.items.map((item) => ({
+      ...item,
+      qty: Number(item.qty) || 0,
+      price: Number(item.price) || 0,
+      gstRate: getItemGstRate(item),
+    }));
+    const { subtotal, gstAmount, total } = calculateTaxTotals(items);
+    const savedDocument = {
+      ...formData,
+      items,
+      subtotal,
+      gstAmount,
+      total,
+      date: formData.date || new Date().toISOString().split("T")[0],
+      validTill: formData.validTill || getDateAfterDays(30),
+    };
+
+    if (editingQuotationId !== null) {
+      setQuotations((currentQuotations) =>
+        currentQuotations.map((quotation) =>
+          quotation.id === editingQuotationId
+            ? { ...quotation, ...savedDocument }
+            : quotation,
+        ),
+      );
+    } else {
+      setQuotations((currentQuotations) => [
+        ...currentQuotations,
+        { ...savedDocument, id: Date.now(), status: "draft" },
+      ]);
+    }
+
+    setFormData(createEmptyQuotationForm());
+    setEditingQuotationId(null);
     setShowForm(false);
   };
 
   const generatePDF = (quotation) => {
-    const pdf = new jsPDF();
-    pdf.setFontSize(16);
-    pdf.text("QUOTATION", 20, 20);
-    pdf.setFontSize(10);
-    pdf.text(`Quote #: ${quotation.quoteNo}`, 20, 30);
-    pdf.text(`Customer: ${quotation.customer}`, 20, 40);
-    pdf.text(`Date: ${quotation.date}`, 20, 50);
-    pdf.text(`Valid Till: ${quotation.validTill}`, 20, 60);
+    downloadDocumentPdf(quotation, "quotation");
+  };
 
-    let yPos = 75;
-    quotation.items.forEach((item) => {
-      pdf.text(
-        `${item.name} - Qty: ${item.qty} @ ₹${item.price} - GST ${getItemGstRate(item)}%`,
-        20,
-        yPos,
-      );
-      yPos += 10;
+  const startEditingQuotation = (quotation) => {
+    setEditingQuotationId(quotation.id);
+    setFormData({
+      ...createEmptyQuotationForm(),
+      ...quotation,
+      items: (quotation.items || []).map((item) => ({
+        ...item,
+        qty: item.qty ?? "",
+        price: item.price ?? "",
+        gstRate: item.gstRate ?? "",
+      })),
     });
+    setShowForm(true);
+  };
 
-    pdf.text(`Subtotal: ₹${quotation.subtotal}`, 20, yPos);
-    pdf.text(`GST (per item slab): ₹${quotation.gstAmount}`, 20, yPos + 10);
-    pdf.text(`TOTAL: ₹${quotation.total}`, 20, yPos + 20, {
-      fontSize: 12,
-      fontStyle: "bold",
-    });
-
-    pdf.save(`Quote-${quotation.quoteNo}.pdf`);
+  const updateFormField = (name, value) => {
+    setFormData((current) => ({ ...current, [name]: value }));
   };
 
   return (
     <div className="space-y-6">
       <div className="flex gap-4">
-        <button
-          onClick={() => setShowForm(!showForm)}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-        >
-          <Plus size={18} />
-          New Quotation
-        </button>
+        {!readOnly && (
+          <button
+            onClick={() => {
+              setEditingQuotationId(null);
+              setFormData(createEmptyQuotationForm());
+              setShowForm((current) => !current);
+            }}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+          >
+            <Plus size={18} />
+            New Quotation
+          </button>
+        )}
       </div>
 
-      {showForm && (
+      {!readOnly && showForm && (
         <div className="bg-white p-6 rounded-lg border border-slate-200">
-          <h3 className="text-xl font-bold mb-4">Create Quotation</h3>
+          <h3 className="text-xl font-bold mb-4">
+            {editingQuotationId === null
+              ? "Create Quotation"
+              : "Edit Quotation"}
+          </h3>
           <form onSubmit={handleAddQuotation} className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <input
-                type="text"
-                placeholder="Quote No."
-                value={formData.quoteNo}
-                onChange={(e) =>
-                  setFormData({ ...formData, quoteNo: e.target.value })
-                }
-                required
-                className="px-3 py-2 border border-slate-300 rounded-lg"
-              />
-              <input
-                type="text"
-                placeholder="Customer Name"
-                value={formData.customer}
-                onChange={(e) =>
-                  setFormData({ ...formData, customer: e.target.value })
-                }
-                required
-                className="px-3 py-2 border border-slate-300 rounded-lg"
-              />
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="space-y-1 text-sm">
+                <span>Quotation number</span>
+                <input
+                  type="text"
+                  aria-label="Quotation number"
+                  placeholder="Quotation number"
+                  value={formData.quoteNo}
+                  onChange={(event) =>
+                    updateFormField("quoteNo", event.target.value)
+                  }
+                  required
+                  className="w-full rounded-md border border-slate-300 px-3 py-2"
+                />
+              </label>
+              <label className="space-y-1 text-sm">
+                <span>Quotation date</span>
+                <input
+                  type="date"
+                  aria-label="Quotation date"
+                  value={formData.date || ""}
+                  onChange={(event) =>
+                    updateFormField("date", event.target.value)
+                  }
+                  className="w-full rounded-md border border-slate-300 px-3 py-2"
+                />
+              </label>
+              <label className="space-y-1 text-sm">
+                <span>Valid until</span>
+                <input
+                  type="date"
+                  aria-label="Valid until"
+                  value={formData.validTill || ""}
+                  onChange={(event) =>
+                    updateFormField("validTill", event.target.value)
+                  }
+                  className="w-full rounded-md border border-slate-300 px-3 py-2"
+                />
+              </label>
             </div>
-            <textarea
-              placeholder="Special Notes/Terms"
-              value={formData.notes}
-              onChange={(e) =>
-                setFormData({ ...formData, notes: e.target.value })
-              }
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg"
-            ></textarea>
+            <DocumentDetailsEditor
+              formData={formData}
+              onChange={updateFormField}
+            />
+
             <LineItemsEditor
               items={formData.items}
               setItems={(nextItems) =>
@@ -144,16 +211,23 @@ const QuotationComponent = ({ onConvertToInvoice, inventory = [] }) => {
               inventory={inventory}
               listId="quotation-inventory-skus"
             />
+
             <div className="flex gap-2">
               <button
                 type="submit"
                 className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg"
               >
-                Create Quote
+                {editingQuotationId === null
+                  ? "Create Quote"
+                  : "Save Quotation"}
               </button>
               <button
                 type="button"
-                onClick={() => setShowForm(false)}
+                onClick={() => {
+                  setShowForm(false);
+                  setEditingQuotationId(null);
+                  setFormData(createEmptyQuotationForm());
+                }}
                 className="flex-1 px-4 py-2 bg-slate-300 rounded-lg"
               >
                 Cancel
@@ -179,11 +253,16 @@ const QuotationComponent = ({ onConvertToInvoice, inventory = [] }) => {
                 </p>
               </div>
               <span
-                className={`px-3 py-1 rounded-full text-sm font-semibold ${quotation.status === "sent" ? "bg-blue-100 text-blue-700" : "bg-gray-100 text-gray-700"}`}
+                className={`px-3 py-1 rounded-full text-sm font-semibold ${
+                  quotation.status === "sent"
+                    ? "bg-blue-100 text-blue-700"
+                    : "bg-gray-100 text-gray-700"
+                }`}
               >
-                {quotation.status.toUpperCase()}
+                {(quotation.status || "draft").toUpperCase()}
               </span>
             </div>
+
             <div className="mb-3">
               <h4 className="text-sm font-semibold mb-2">Items:</h4>
               {quotation.items.map((item, idx) => (
@@ -193,17 +272,28 @@ const QuotationComponent = ({ onConvertToInvoice, inventory = [] }) => {
                 </p>
               ))}
             </div>
+
             <div className="border-t pt-3 mb-3">
               <p className="text-sm text-slate-600">
-                Subtotal: ₹{quotation.subtotal.toLocaleString()}
+                Subtotal: ₹
+                {Number(quotation.subtotal || 0).toLocaleString("en-IN", {
+                  minimumFractionDigits: 2,
+                })}
               </p>
               <p className="text-sm text-slate-600">
-                GST (per item slab): ₹{quotation.gstAmount.toLocaleString()}
+                GST: ₹
+                {Number(quotation.gstAmount || 0).toLocaleString("en-IN", {
+                  minimumFractionDigits: 2,
+                })}
               </p>
               <p className="text-lg font-bold text-blue-600">
-                Total: ₹{quotation.total.toLocaleString()}
+                Total: ₹
+                {Number(quotation.total || 0).toLocaleString("en-IN", {
+                  minimumFractionDigits: 2,
+                })}
               </p>
             </div>
+
             <div className="flex gap-2">
               <button
                 onClick={() => generatePDF(quotation)}
@@ -212,21 +302,39 @@ const QuotationComponent = ({ onConvertToInvoice, inventory = [] }) => {
                 <Download size={16} />
                 PDF
               </button>
-              <button
-                onClick={() => onConvertToInvoice?.(quotation)}
-                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-              >
-                <ArrowRight size={16} />
-                Convert to Invoice
-              </button>
-              <button
-                onClick={() =>
-                  setQuotations(quotations.filter((q) => q.id !== quotation.id))
-                }
-                className="px-4 py-2 bg-red-100 text-red-600 rounded-lg"
-              >
-                <Trash size={16} />
-              </button>
+
+              {!readOnly && (
+                <>
+                  <button
+                    disabled={quotation.status === "converted"}
+                    onClick={() => startEditingQuotation(quotation)}
+                    className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-slate-100 px-4 py-2 hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <Pencil size={16} /> Edit
+                  </button>
+                  <button
+                    disabled={quotation.status === "converted"}
+                    onClick={() => onConvertToInvoice?.(quotation)}
+                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <ArrowRight size={16} />
+                    {quotation.status === "converted"
+                      ? "Converted"
+                      : "Convert to Invoice"}
+                  </button>
+                  <button
+                    onClick={() =>
+                      setQuotations(
+                        quotations.filter((quote) => quote.id !== quotation.id),
+                      )
+                    }
+                    aria-label={`Delete quotation ${quotation.quoteNo}`}
+                    className="px-4 py-2 bg-red-100 text-red-600 rounded-lg"
+                  >
+                    <Trash size={16} />
+                  </button>
+                </>
+              )}
             </div>
           </div>
         ))}

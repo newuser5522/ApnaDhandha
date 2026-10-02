@@ -4,6 +4,12 @@ export const getPaymentTermDays = (paymentTerms) =>
 export const DEFAULT_GST_RATE = 18;
 
 export const getItemGstRate = (item) => {
+  if (
+    item.gstRate == null ||
+    (typeof item.gstRate === "string" && item.gstRate.trim() === "")
+  ) {
+    return DEFAULT_GST_RATE;
+  }
   const rate = Number(item.gstRate);
   return Number.isFinite(rate) && rate >= 0 && rate <= 100
     ? rate
@@ -11,15 +17,23 @@ export const getItemGstRate = (item) => {
 };
 
 export const calculateTaxTotals = (items) => {
-  const subtotal = items.reduce((sum, item) => sum + item.qty * item.price, 0);
-  const gstAmount = Math.round(
-    items.reduce(
-      (sum, item) => sum + (item.qty * item.price * getItemGstRate(item)) / 100,
-      0,
-    ),
+  const totalsInPaise = items.reduce(
+    (totals, item) => {
+      const taxableValue = (Number(item.qty) || 0) * (Number(item.price) || 0);
+      totals.subtotal += Math.round(taxableValue * 100);
+      totals.gst += Math.round(taxableValue * getItemGstRate(item));
+      return totals;
+    },
+    { subtotal: 0, gst: 0 },
   );
+  const subtotal = totalsInPaise.subtotal / 100;
+  const gstAmount = totalsInPaise.gst / 100;
 
-  return { subtotal, gstAmount, total: subtotal + gstAmount };
+  return {
+    subtotal,
+    gstAmount,
+    total: Math.round((totalsInPaise.subtotal + totalsInPaise.gst) / 100),
+  };
 };
 
 export const getInvoiceOutstanding = (invoice) =>

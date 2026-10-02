@@ -6,6 +6,7 @@ const InventoryComponent = ({
   inventory,
   setInventory,
   onConvertToReorder,
+  readOnly = false,
 }) => {
   const [showForm, setShowForm] = useState(false);
   const [formData, setFormData] = useState({
@@ -150,13 +151,15 @@ const InventoryComponent = ({
           onChange={(e) => setSearchTerm(e.target.value)}
           className="flex-1 px-4 py-2 border border-slate-300 rounded-lg"
         />
-        <button
-          onClick={() => setShowForm(!showForm)}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-        >
-          <Plus size={18} />
-          Add Item
-        </button>
+        {!readOnly && (
+          <button
+            onClick={() => setShowForm(!showForm)}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+          >
+            <Plus size={18} />
+            Add Item
+          </button>
+        )}
         <button
           onClick={exportInventory}
           className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
@@ -282,7 +285,11 @@ const InventoryComponent = ({
                 <th className="px-4 py-3 text-left font-semibold">Supplier</th>
                 <th className="px-4 py-3 text-right font-semibold">Price</th>
                 <th className="px-4 py-3 text-center font-semibold">Status</th>
-                <th className="px-4 py-3 text-center font-semibold">Action</th>
+                {!readOnly && (
+                  <th className="px-4 py-3 text-center font-semibold">
+                    Action
+                  </th>
+                )}
               </tr>
             </thead>
             <tbody>
@@ -307,16 +314,21 @@ const InventoryComponent = ({
                       {item.quantity <= item.reorderLevel ? "🔴 LOW" : "✅ OK"}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-center">
-                    <button
-                      onClick={() =>
-                        setInventory(inventory.filter((i) => i.id !== item.id))
-                      }
-                      className="text-red-600 hover:bg-red-50 p-1 rounded"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </td>
+                  {!readOnly && (
+                    <td className="px-4 py-3 text-center">
+                      <button
+                        onClick={() =>
+                          setInventory(
+                            inventory.filter((i) => i.id !== item.id),
+                          )
+                        }
+                        className="text-red-600 hover:bg-red-50 p-1 rounded"
+                        aria-label={`Delete ${item.productName}`}
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>

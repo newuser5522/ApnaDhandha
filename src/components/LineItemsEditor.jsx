@@ -35,6 +35,8 @@ export default function LineItemsEditor({
         sku: matchedProduct.sku,
         name: matchedProduct.productName,
         price: Number(matchedProduct.unitPrice) || 0,
+        hsnSac: matchedProduct.hsnSac || matchedProduct.hsn || "",
+        unit: matchedProduct.unit || "",
       });
       return;
     }
@@ -54,7 +56,10 @@ export default function LineItemsEditor({
         );
 
         return (
-          <div key={index} className="grid grid-cols-2 gap-2 md:grid-cols-6">
+          <div
+            key={index}
+            className="grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-8"
+          >
             <div className="min-w-0 space-y-1">
               <input
                 type="text"
@@ -84,46 +89,59 @@ export default function LineItemsEditor({
               className="min-w-0 rounded-lg border border-slate-300 px-3 py-2"
             />
             <input
-              type="number"
-              placeholder="Qty"
-              aria-label={`Quantity for item ${index + 1}`}
-              min="0"
-              value={item.qty}
+              type="text"
+              placeholder="HSN / SAC"
+              aria-label={`HSN or SAC code for item ${index + 1}`}
+              value={item.hsnSac || ""}
               onChange={(event) =>
-                updateItem(index, {
-                  qty: parseFloat(event.target.value) || 0,
-                })
+                updateItem(index, { hsnSac: event.target.value })
+              }
+              className="min-w-0 rounded-lg border border-slate-300 px-3 py-2"
+            />
+            <input
+              type="text"
+              placeholder="Unit (e.g., pcs)"
+              aria-label={`Unit for item ${index + 1}`}
+              value={item.unit || ""}
+              onChange={(event) =>
+                updateItem(index, { unit: event.target.value })
               }
               className="min-w-0 rounded-lg border border-slate-300 px-3 py-2"
             />
             <input
               type="number"
-              placeholder="Price"
+              placeholder="Quantity"
+              aria-label={`Quantity for item ${index + 1}`}
+              min="0"
+              value={item.qty ?? ""}
+              onChange={(event) =>
+                updateItem(index, { qty: event.target.value })
+              }
+              className="min-w-0 rounded-lg border border-slate-300 px-3 py-2"
+            />
+            <input
+              type="number"
+              placeholder="Unit price (₹)"
               aria-label={`Unit price for item ${index + 1}`}
               min="0"
               step="0.01"
-              value={item.price}
+              value={item.price ?? ""}
               onChange={(event) =>
-                updateItem(index, {
-                  price: parseFloat(event.target.value) || 0,
-                })
+                updateItem(index, { price: event.target.value })
               }
               className="min-w-0 rounded-lg border border-slate-300 px-3 py-2"
             />
             <input
               type="number"
-              placeholder="GST %"
+              placeholder="GST rate (%)"
               aria-label={`GST rate for item ${index + 1} (%)`}
               list={`${listId}-gst`}
               min="0"
               max="100"
               step="0.01"
-              required
-              value={getItemGstRate(item)}
+              value={item.gstRate ?? ""}
               onChange={(event) =>
-                updateItem(index, {
-                  gstRate: parseFloat(event.target.value) || 0,
-                })
+                updateItem(index, { gstRate: event.target.value })
               }
               className="min-w-0 rounded-lg border border-slate-300 px-3 py-2"
             />
@@ -152,18 +170,18 @@ export default function LineItemsEditor({
         ))}
       </datalist>
       <datalist id={`${listId}-gst`}>
-        <option value="0" />
-        <option value="5" />
-        <option value="12" />
-        <option value="18" />
-        <option value="28" />
+        <option value="0" label="GST exempt (0%)" />
+        <option value="5" label="GST rate (5%)" />
+        <option value="12" label="GST rate (12%)" />
+        <option value="18" label="GST rate (18%)" />
+        <option value="28" label="GST rate (28%)" />
       </datalist>
       <button
         type="button"
         onClick={() =>
           setItems((currentItems) => [
             ...currentItems,
-            { name: "", qty: 0, price: 0, gstRate: 18 },
+            { name: "", hsnSac: "", unit: "", qty: "", price: "", gstRate: "" },
           ])
         }
         className="flex items-center gap-1 text-sm text-blue-600"
