@@ -110,6 +110,12 @@ function AuthenticatedApp() {
 
       <div className="mx-auto mt-6 max-w-7xl px-4 sm:px-6">
         <div className="mb-6 flex flex-wrap gap-2 rounded-2xl border border-slate-200 bg-white/80 p-2 shadow-sm backdrop-blur-sm">
+          <button
+            onClick={() => setActiveTab("dashboard")}
+            className={`flex items-center gap-2 rounded-xl px-4 py-2.5 font-semibold transition ${activeTab === "dashboard" ? "bg-linear-to-r from-blue-500 to-indigo-600 text-white shadow-md" : "text-slate-600 hover:bg-slate-100"}`}
+          >
+            <Home size={18} /> Dashboard
+          </button>
           {["Admin", "Manager"].includes(user.role) && (
             <button
               onClick={() => setActiveTab("team")}
@@ -149,6 +155,7 @@ function AuthenticatedApp() {
 
         {/* Content */}
         <div className="pb-6">
+          {activeTab === "dashboard" && <DashboardComponent data={appData} />}
           {activeTab === "team" && ["Admin", "Manager"].includes(user.role) && (
             <TeamComponent currentUser={user} />
           )}

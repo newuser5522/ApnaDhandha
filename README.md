@@ -1,56 +1,48 @@
 # Apna Dhandha
 
-A React single-page business app built with Vite. The active app provides a dashboard, inventory, quotations, invoices, and a persisted team directory. Quote and invoice items can autofill from inventory by SKU, with manual entry for unmatched products and editable GST rates.
+Apna Dhandha is a multi-shop CRM for small businesses. Each shop has an isolated workspace for its team, inventory, quotations, and invoices.
 
-## Run Locally
+## Features
+
+- Shop owners can create a shop and Admin account after email OTP verification.
+- Admins can invite team members with one-time links that expire after seven days.
+- Admins manage shop users. Managers can manage Staff accounts; Staff use the operational workspace.
+- Dashboard shows revenue, outstanding balances, estimated profit margin, low-stock items, and overdue invoices. Profit is a rough demo estimate using a fixed 65% cost assumption, not accounting data.
+- Inventory supports search, stock/reorder tracking, low-stock alerts, and spreadsheet-compatible CSV export.
+- Quotations and invoices support editable shop/customer details, line items, HSN/SAC, units, GST rates, dates, terms, and notes.
+- Quotations can be converted to invoices. Invoices track payments, balances, and payment history.
+- Invoices and quotations export as PDFs.
+- Password recovery uses email OTP verification. In development, verification codes are shown in the app; production sends codes through SMTP.
+- Shop data is isolated server-side in SQLite. Passwords are hashed, sessions use HTTP-only cookies, and authentication routes are rate-limited.
+
+## Requirements
+
+- Node.js 24 or later.
+- npm.
+
+## Run locally
 
 ```bash
 npm install
-Copy-Item .env.example .env
+npm run setup:auth
 npm run dev
 ```
 
-Before starting, set independent random values for `SESSION_SECRET` and
-`BOOTSTRAP_ADMIN_TOKEN` in `.env`. Generate a value with:
+Open [http://localhost:5000](http://localhost:5000). The development API listens on port 3001 and Vite proxies API requests to it. Local development does not require SMTP; the app displays development OTP codes.
+
+If `.env` already exists, `npm run setup:auth` leaves it unchanged. Keep `.env` private and never commit it.
+
+## Tests and build
 
 ```bash
-node -e "console.log(require('node:crypto').randomBytes(48).toString('hex'))"
+npm test
+npm run build
 ```
 
-Use `APP_ORIGIN=http://localhost:5000` locally. On Replit, configure the same
-variables as Secrets and set `APP_ORIGIN` to the deployed HTTPS origin. The
-first visit asks for the bootstrap token to create the initial Admin account.
+`npm start` runs the `prestart` build and starts the production Node server on `PORT` (default 5000). The readiness endpoint is `/api/health`.
 
-The server stores password hashes, invitations, sessions, and shared business
-collections in SQLite under `data/`. Keep that directory on persistent storage
-in production. Admin-created invitations and password-reset links are one-time
-links that must currently be shared manually; no email service is configured.
+## Production setup
 
-Run `npm run build` and `npm start` for production. Node 24 or newer is required.
+Production requires a persistent disk for SQLite, a single app instance, HTTPS, and configured SMTP. Set `NODE_ENV=production`, `SESSION_SECRET`, `APP_ORIGIN`, `AUTH_DATABASE_PATH`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, and either `SMTP_FROM` or `SMTP_USER` with `SMTP_PASS` in your host's secret manager. The server verifies SMTP before listening and does not expose OTPs in production responses.
 
-## Source Structure
-
-```text
-src/
-  App.jsx                  App shell, navigation, and shared business state
-  main.jsx                 React entry point
-  database.js              IndexedDB collection hook
-  index.css                Tailwind and global styles
-  components/
-    Dashboard.jsx          Business summary and alerts
-    Inventory.jsx          Inventory list, entry form, and export
-    LineItemsEditor.jsx    Shared SKU lookup and manual line-item entry
-    Quotation.jsx          Quote creation, export, and invoice conversion
-    Invoice.jsx            Invoice creation, payment status, and export
-    Team.jsx               Team directory, roles, and active status management
-  utils/
-    invoices.js            Shared invoice and line-item helpers
-server/
-  app.js                   Authenticated API and authorization checks
-  database.js              SQLite schema and shared company data
-  SQLiteSessionStore.js    Persistent HTTP session store
-  index.js                 Production server
-  dev.js                   API and Vite development servers
-```
-
-`ApnaDhandha-AllPhases-Complete.jsx` remains as a compatibility re-export; the maintained implementation lives under `src/`.
+See [DEPLOYMENT.md](DEPLOYMENT.md) for environment details, database backup guidance, and the legacy database migration notes. Back up an existing database before its first start on the tenant-aware build.
