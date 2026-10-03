@@ -13,9 +13,9 @@ const InventoryComponent = ({
   const [formData, setFormData] = useState({
     sku: "",
     productName: "",
-    quantity: 0,
-    reorderLevel: 0,
-    unitPrice: 0,
+    quantity: "",
+    reorderLevel: "",
+    unitPrice: "",
     warehouse: "Main",
     category: "Electronics",
     supplier: "",
@@ -39,18 +39,18 @@ const InventoryComponent = ({
       {
         ...formData,
         id: Date.now(),
-        quantity: parseInt(formData.quantity),
-        reorderLevel: parseInt(formData.reorderLevel),
-        unitPrice: parseInt(formData.unitPrice),
+        quantity: parseInt(formData.quantity, 10),
+        reorderLevel: parseInt(formData.reorderLevel, 10),
+        unitPrice: parseFloat(formData.unitPrice),
         lastRestocked: getLocalDateString(),
       },
     ]);
     setFormData({
       sku: "",
       productName: "",
-      quantity: 0,
-      reorderLevel: 0,
-      unitPrice: 0,
+      quantity: "",
+      reorderLevel: "",
+      unitPrice: "",
       warehouse: "Main",
       category: "Electronics",
       supplier: "",
@@ -211,6 +211,7 @@ const InventoryComponent = ({
             <input
               type="number"
               placeholder="Quantity"
+              min="0"
               value={formData.quantity}
               onChange={(e) =>
                 setFormData({ ...formData, quantity: e.target.value })
@@ -221,6 +222,7 @@ const InventoryComponent = ({
             <input
               type="number"
               placeholder="Reorder Level"
+              min="0"
               value={formData.reorderLevel}
               onChange={(e) =>
                 setFormData({ ...formData, reorderLevel: e.target.value })
@@ -231,6 +233,8 @@ const InventoryComponent = ({
             <input
               type="number"
               placeholder="Unit Price (₹)"
+              min="0"
+              step="0.01"
               value={formData.unitPrice}
               onChange={(e) =>
                 setFormData({ ...formData, unitPrice: e.target.value })
