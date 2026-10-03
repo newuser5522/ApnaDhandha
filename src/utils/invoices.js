@@ -1,6 +1,12 @@
 export const getPaymentTermDays = (paymentTerms) =>
   paymentTerms === "Cash" ? 0 : parseInt(paymentTerms?.split(" ")[1], 10) || 30;
 
+export const getLocalDateString = (date = new Date()) => {
+  const localDate = new Date(date);
+  localDate.setMinutes(localDate.getMinutes() - localDate.getTimezoneOffset());
+  return localDate.toISOString().split("T")[0];
+};
+
 export const DEFAULT_GST_RATE = 18;
 
 export const getItemGstRate = (item) => {

@@ -1,6 +1,7 @@
 import { useState } from "react";
-import * as XLSX from "xlsx";
 import { Plus, Trash2, Download, Search, ShoppingCart } from "lucide-react";
+import { getLocalDateString } from "../utils/invoices.js";
+import { encodeCsvRows } from "../utils/csv.js";
 
 const InventoryComponent = ({
   inventory,
@@ -41,7 +42,7 @@ const InventoryComponent = ({
         quantity: parseInt(formData.quantity),
         reorderLevel: parseInt(formData.reorderLevel),
         unitPrice: parseInt(formData.unitPrice),
-        lastRestocked: new Date().toISOString().split("T")[0],
+        lastRestocked: getLocalDateString(),
       },
     ]);
     setFormData({
@@ -63,23 +64,38 @@ const InventoryComponent = ({
   );
 
   const exportInventory = () => {
-    const data = filteredInventory.map((item) => ({
-      SKU: item.sku,
-      Product: item.productName,
-      Qty: item.quantity,
-      "Reorder Level": item.reorderLevel,
-      "Unit Price": item.unitPrice,
-      "Total Value": item.quantity * item.unitPrice,
-      Status: item.quantity <= item.reorderLevel ? "🔴 LOW STOCK" : "✅ OK",
-      Supplier: item.supplier,
-    }));
-    const ws = XLSX.utils.json_to_sheet(data);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Inventory");
-    XLSX.writeFile(
-      wb,
-      `Inventory-${new Date().toISOString().split("T")[0]}.xlsx`,
+    const rows = [
+      [
+        "SKU",
+        "Product",
+        "Qty",
+        "Reorder Level",
+        "Unit Price",
+        "Total Value",
+        "Status",
+        "Supplier",
+      ],
+      ...filteredInventory.map((item) => [
+        item.sku,
+        item.productName,
+        item.quantity,
+        item.reorderLevel,
+        item.unitPrice,
+        item.quantity * item.unitPrice,
+        item.quantity <= item.reorderLevel ? "LOW STOCK" : "OK",
+        item.supplier,
+      ]),
+    ];
+    const url = URL.createObjectURL(
+      new Blob([encodeCsvRows(rows)], { type: "text/csv;charset=utf-8" }),
     );
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `Inventory-${getLocalDateString()}.csv`;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
   return (
@@ -165,10 +181,9 @@ const InventoryComponent = ({
           className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
         >
           <Download size={18} />
-          Export
+          Export CSV
         </button>
       </div>
-
       {showForm && (
         <div className="bg-white p-6 rounded-lg border border-slate-200">
           <h3 className="text-xl font-bold mb-4">Add Inventory Item</h3>
@@ -177,8 +192,8 @@ const InventoryComponent = ({
               type="text"
               placeholder="SKU"
               value={formData.sku}
-              onChange={(e) =>
-                setFormData({ ...formData, sku: e.target.value })
+              onChange={(event) =>
+                setFormData({ ...formData, sku: event.target.value })
               }
               required
               className="px-3 py-2 border border-slate-300 rounded-lg"

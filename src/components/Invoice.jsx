@@ -2,6 +2,7 @@ import { useState } from "react";
 import React from "react";
 import {
   calculateTaxTotals,
+  getLocalDateString,
   getInvoiceOutstanding,
   getItemGstRate,
   getPaymentTermDays,
@@ -15,7 +16,7 @@ import { Plus, Download, Trash, CreditCard, Pencil } from "lucide-react";
 const getDateAfterDays = (days) => {
   const date = new Date();
   date.setDate(date.getDate() + days);
-  return date.toISOString().split("T")[0];
+  return getLocalDateString(date);
 };
 
 const createEmptyInvoiceForm = () => ({
@@ -45,7 +46,7 @@ const createEmptyInvoiceForm = () => ({
   items: [{ name: "", hsnSac: "", unit: "", qty: "", price: "", gstRate: "" }],
   paymentTerms: "NET 30",
   notes: "",
-  date: new Date().toISOString().split("T")[0],
+  date: getLocalDateString(),
   dueDate: getDateAfterDays(30),
 });
 
@@ -78,7 +79,7 @@ const InvoiceComponent = ({
         paymentStatus: "pending",
         amountPaid: 0,
         paymentTerms: "NET 30",
-        dueDate: newQuoteData.dueDate || dueDate.toISOString().split("T")[0],
+        dueDate: newQuoteData.dueDate || getLocalDateString(dueDate),
         notes: newQuoteData.notes || "Converted from quotation",
         id: Date.now(),
       };
@@ -106,7 +107,7 @@ const InvoiceComponent = ({
     const dueDate =
       formData.dueDate ||
       getDateAfterDays(getPaymentTermDays(formData.paymentTerms));
-    const date = formData.date || new Date().toISOString().split("T")[0];
+    const date = formData.date || getLocalDateString();
     const savedDocument = {
       ...formData,
       items,
@@ -158,8 +159,13 @@ const InvoiceComponent = ({
     setShowForm(false);
   };
 
-  const generatePDF = (invoice) => {
-    downloadDocumentPdf(invoice, "invoice");
+  const generatePDF = async (invoice) => {
+    try {
+      await downloadDocumentPdf(invoice, "invoice");
+    } catch (error) {
+      console.error("Invoice PDF export failed.", error);
+      alert("Unable to create the invoice PDF. Please try again.");
+    }
   };
 
   const startEditingInvoice = (invoice) => {
@@ -212,7 +218,7 @@ const InvoiceComponent = ({
     const payment = {
       id: Date.now(),
       amount: amountInPaise / 100,
-      date: new Date().toISOString().split("T")[0],
+      date: getLocalDateString(),
       method: paymentForm.method,
       reference: paymentForm.reference.trim(),
     };

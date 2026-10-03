@@ -1,7 +1,7 @@
 import { useState } from "react";
 import AuthGate, { useAuth } from "./auth/AuthGate.jsx";
 import { useDatabaseCollection } from "./database.js";
-import { getPaymentTermDays } from "./utils/invoices.js";
+import { getLocalDateString, getPaymentTermDays } from "./utils/invoices.js";
 import DashboardComponent from "./components/Dashboard.jsx";
 import InventoryComponent from "./components/Inventory.jsx";
 import QuotationComponent from "./components/Quotation.jsx";
@@ -30,11 +30,11 @@ function AuthenticatedApp() {
   const [activeTab, setActiveTab] = useState("dashboard");
   const [newQuoteData, setNewQuoteData] = useState(null);
   const [inventory, setInventory, inventoryLoaded, inventoryError] =
-    useDatabaseCollection("inventory", []);
+    useDatabaseCollection("inventory", [], user.shopId);
   const [invoices, setInvoices, invoicesLoaded, invoicesError] =
-    useDatabaseCollection("invoices", []);
+    useDatabaseCollection("invoices", [], user.shopId);
   const [quotations, setQuotations, quotationsLoaded, quotationsError] =
-    useDatabaseCollection("quotations", []);
+    useDatabaseCollection("quotations", [], user.shopId);
 
   if (!inventoryLoaded || !invoicesLoaded || !quotationsLoaded) {
     return (
@@ -60,11 +60,11 @@ function AuthenticatedApp() {
     const invoice = {
       ...quotationDetails,
       invoiceNo: `INV-${Date.now()}`,
-      date: new Date().toISOString().split("T")[0],
+      date: getLocalDateString(),
       paymentStatus: "pending",
       amountPaid: 0,
       paymentTerms: "NET 30",
-      dueDate: dueDate.toISOString().split("T")[0],
+      dueDate: getLocalDateString(dueDate),
       notes: quote.notes || "Converted from quotation",
       sourceQuotationId: quote.id,
       id: Date.now(),
@@ -113,26 +113,26 @@ function AuthenticatedApp() {
           {["Admin", "Manager"].includes(user.role) && (
             <button
               onClick={() => setActiveTab("team")}
-              className={`flex items-center gap-2 rounded-xl px-4 py-2.5 font-semibold transition ${activeTab === "team" ? "bg-gradient-to-r from-sky-500 to-cyan-600 text-white shadow-md" : "text-slate-600 hover:bg-slate-100"}`}
+              className={`flex items-center gap-2 rounded-xl px-4 py-2.5 font-semibold transition ${activeTab === "team" ? "bg-linear-to-r from-sky-500 to-cyan-600 text-white shadow-md" : "text-slate-600 hover:bg-slate-100"}`}
             >
               <Users size={18} /> Team
             </button>
           )}
           <button
             onClick={() => setActiveTab("inventory")}
-            className={`flex items-center gap-2 rounded-xl px-4 py-2.5 font-semibold transition ${activeTab === "inventory" ? "bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-md" : "text-slate-600 hover:bg-slate-100"}`}
+            className={`flex items-center gap-2 rounded-xl px-4 py-2.5 font-semibold transition ${activeTab === "inventory" ? "bg-linear-to-r from-emerald-500 to-teal-600 text-white shadow-md" : "text-slate-600 hover:bg-slate-100"}`}
           >
             <Package size={18} /> Inventory
           </button>
           <button
             onClick={() => setActiveTab("quotations")}
-            className={`flex items-center gap-2 rounded-xl px-4 py-2.5 font-semibold transition ${activeTab === "quotations" ? "bg-gradient-to-r from-violet-500 to-purple-600 text-white shadow-md" : "text-slate-600 hover:bg-slate-100"}`}
+            className={`flex items-center gap-2 rounded-xl px-4 py-2.5 font-semibold transition ${activeTab === "quotations" ? "bg-linear-to-r from-violet-500 to-purple-600 text-white shadow-md" : "text-slate-600 hover:bg-slate-100"}`}
           >
             <FileText size={18} /> Quotations
           </button>
           <button
             onClick={() => setActiveTab("invoices")}
-            className={`flex items-center gap-2 rounded-xl px-4 py-2.5 font-semibold transition ${activeTab === "invoices" ? "bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-md" : "text-slate-600 hover:bg-slate-100"}`}
+            className={`flex items-center gap-2 rounded-xl px-4 py-2.5 font-semibold transition ${activeTab === "invoices" ? "bg-linear-to-r from-amber-500 to-orange-500 text-white shadow-md" : "text-slate-600 hover:bg-slate-100"}`}
           >
             <DollarSign size={18} /> Invoices
           </button>

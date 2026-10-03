@@ -2,7 +2,7 @@ import "dotenv/config";
 import express from "express";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
-import { createApp } from "./app.js";
+import { createApp, verifyProductionEmailTransport } from "./app.js";
 
 if (process.env.NODE_ENV === "production" && !process.env.APP_ORIGIN) {
   throw new Error("APP_ORIGIN must be configured for production.");
@@ -11,6 +11,7 @@ if (process.env.NODE_ENV === "production" && !process.env.APP_ORIGIN) {
 const app = createApp();
 const distDirectory = resolve("dist");
 if (process.env.NODE_ENV === "production") {
+  await verifyProductionEmailTransport();
   if (!existsSync(resolve(distDirectory, "index.html"))) {
     throw new Error("Production build is missing. Run npm run build first.");
   }

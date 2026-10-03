@@ -35,6 +35,10 @@ const request = async (path, { method = "GET", body, cookie } = {}) => {
 };
 
 test("invitation-only authentication protects team and shared business data", async () => {
+  const health = await request("/api/health");
+  assert.equal(health.response.status, 200);
+  assert.equal(health.payload.status, "ok");
+
   const status = await request("/api/auth/status");
   assert.equal(status.payload.hasUsers, false);
   assert.equal(status.payload.bootstrapConfigured, true);

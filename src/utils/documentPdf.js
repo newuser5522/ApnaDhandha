@@ -1,4 +1,3 @@
-import jsPDF from "jspdf";
 import { calculateTaxTotals, getItemGstRate } from "./invoices.js";
 
 const PAGE_WIDTH = 210;
@@ -413,7 +412,8 @@ function drawFooter(pdf, document, y) {
   });
 }
 
-export function downloadDocumentPdf(document, kind) {
+export async function downloadDocumentPdf(document, kind) {
+  const { default: jsPDF } = await import("jspdf");
   const pdf = new jsPDF({ unit: "mm", format: "a4" });
   const totals = calculateTaxTotals(document.items || []);
   let y = drawPageHeader(pdf, document, kind);

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import {
   calculateTaxTotals,
+  getLocalDateString,
   getItemGstRate,
   hasValidLineItems,
 } from "../utils/invoices.js";
@@ -12,7 +13,7 @@ import { ArrowRight, Download, Plus, Trash, Pencil } from "lucide-react";
 const getDateAfterDays = (days) => {
   const date = new Date();
   date.setDate(date.getDate() + days);
-  return date.toISOString().split("T")[0];
+  return getLocalDateString(date);
 };
 
 const createEmptyQuotationForm = () => ({
@@ -41,7 +42,7 @@ const createEmptyQuotationForm = () => ({
   termsConditions: "",
   items: [{ name: "", hsnSac: "", unit: "", qty: "", price: "", gstRate: "" }],
   notes: "",
-  date: new Date().toISOString().split("T")[0],
+  date: getLocalDateString(),
   validTill: getDateAfterDays(30),
 });
 
@@ -79,7 +80,7 @@ const QuotationComponent = ({
       subtotal,
       gstAmount,
       total,
-      date: formData.date || new Date().toISOString().split("T")[0],
+      date: formData.date || getLocalDateString(),
       validTill: formData.validTill || getDateAfterDays(30),
     };
 
@@ -103,8 +104,13 @@ const QuotationComponent = ({
     setShowForm(false);
   };
 
-  const generatePDF = (quotation) => {
-    downloadDocumentPdf(quotation, "quotation");
+  const generatePDF = async (quotation) => {
+    try {
+      await downloadDocumentPdf(quotation, "quotation");
+    } catch (error) {
+      console.error("Quotation PDF export failed.", error);
+      alert("Unable to create the quotation PDF. Please try again.");
+    }
   };
 
   const startEditingQuotation = (quotation) => {

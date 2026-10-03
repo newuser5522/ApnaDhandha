@@ -1,9 +1,15 @@
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import {
+  createHash,
+  randomBytes,
+  randomInt,
+  timingSafeEqual,
+} from "node:crypto";
 import express from "express";
 import session from "express-session";
 import bcrypt from "bcryptjs";
 import rateLimit from "express-rate-limit";
 import helmet from "helmet";
+import nodemailer from "nodemailer";
 import { database } from "./database.js";
 import { SQLiteSessionStore } from "./SQLiteSessionStore.js";
 
@@ -21,7 +27,33 @@ const WRITE_PERMISSIONS = {
   Staff: new Set(COLLECTIONS),
 };
 const SESSION_AGE = 8 * 60 * 60 * 1000;
-const SAFE_USER_FIELDS = `id, name, shop_name, email, phone, role, status, email_verified_at, created_at, updated_at`;
+const SAFE_USER_FIELDS = `id, shop_id, name, shop_name, email, phone, role, status, email_verified_at, created_at, updated_at`;
+const mailTransport = process.env.SMTP_HOST
+  ? nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port: Number(process.env.SMTP_PORT) || 587,
+      secure: process.env.SMTP_SECURE === "true",
+      auth: process.env.SMTP_USER
+        ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
+        : undefined,
+    })
+  : null;
+const smtpSender = process.env.SMTP_FROM || process.env.SMTP_USER;
+if (
+  process.env.NODE_ENV === "production" &&
+  (!mailTransport ||
+    !smtpSender ||
+    (process.env.SMTP_USER && !process.env.SMTP_PASS))
+) {
+  throw new Error(
+    "SMTP_HOST and SMTP_FROM (or SMTP_USER/SMTP_PASS) must be configured for production.",
+  );
+}
+
+export const verifyProductionEmailTransport = async () => {
+  if (process.env.NODE_ENV !== "production") return;
+  await mailTransport.verify();
+};
 
 const hashToken = (token) => createHash("sha256").update(token).digest("hex");
 
@@ -36,7 +68,7 @@ const isValidPassword = (password) =>
   password.length >= 12 &&
   password.length <= 128;
 
-const generateOtp = () => String(Math.floor(100000 + Math.random() * 900000));
+const generateOtp = () => String(randomInt(100000, 1000000));
 
 const hashOtp = (otp) => createHash("sha256").update(String(otp)).digest("hex");
 
@@ -60,11 +92,11 @@ const validateOtp = (email, purpose, otp) => {
 
   const record = database
     .prepare(
-      `SELECT id, otp_hash, expires_at FROM email_otps WHERE email = ? AND purpose = ? ORDER BY created_at DESC LIMIT 1`,
+      `SELECT id, otp_hash, expires_at, verified_at FROM email_otps WHERE email = ? AND purpose = ? ORDER BY created_at DESC LIMIT 1`,
     )
     .get(normalizedEmail, purpose);
 
-  if (!record || record.expires_at <= Date.now()) {
+  if (!record || record.verified_at || record.expires_at <= Date.now()) {
     return false;
   }
 
@@ -75,11 +107,11 @@ const consumeOtp = (email, purpose, otp) => {
   const normalizedEmail = normalizeEmail(email);
   const record = database
     .prepare(
-      `SELECT id, otp_hash, expires_at FROM email_otps WHERE email = ? AND purpose = ? ORDER BY created_at DESC LIMIT 1`,
+      `SELECT id, otp_hash, expires_at, verified_at FROM email_otps WHERE email = ? AND purpose = ? ORDER BY created_at DESC LIMIT 1`,
     )
     .get(normalizedEmail, purpose);
 
-  if (!record || record.expires_at <= Date.now()) {
+  if (!record || record.verified_at || record.expires_at <= Date.now()) {
     return false;
   }
 
@@ -101,6 +133,7 @@ const safeUser = (user) => ({
   phone: user.phone,
   role: user.role,
   status: user.status,
+  shopId: user.shop_id || user.shopId,
   emailVerifiedAt: user.email_verified_at || user.emailVerifiedAt || null,
   createdAt: user.created_at || user.createdAt,
   updatedAt: user.updated_at || user.updatedAt,
@@ -167,7 +200,20 @@ export function createApp() {
   app.set("trust proxy", 1);
   app.use(
     helmet({
-      contentSecurityPolicy: false,
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: ["'self'"],
+          styleSrc: ["'self'", "'unsafe-inline'"],
+          imgSrc: ["'self'", "data:", "blob:"],
+          fontSrc: ["'self'", "data:"],
+          connectSrc: ["'self'"],
+          objectSrc: ["'none'"],
+          baseUri: ["'self'"],
+          formAction: ["'self'"],
+          frameAncestors: ["'none'"],
+        },
+      },
       crossOriginEmbedderPolicy: false,
     }),
   );
@@ -230,13 +276,24 @@ export function createApp() {
     next();
   };
 
-  const requireAdmin = (request, response, next) => {
-    if (request.user.role !== "Admin") {
-      response.status(403).json({ error: "Administrator access required." });
+  const requireTeamAccess = (request, response, next) => {
+    if (!["Admin", "Manager"].includes(request.user.role)) {
+      response
+        .status(403)
+        .json({ error: "Administrator or manager access required." });
       return;
     }
     next();
   };
+
+  app.get("/api/health", (request, response) => {
+    try {
+      database.prepare("SELECT 1").get();
+      response.json({ status: "ok" });
+    } catch {
+      response.status(503).json({ status: "unavailable" });
+    }
+  });
 
   app.get("/api/auth/status", (request, response) => {
     const userCount = database
@@ -248,7 +305,7 @@ export function createApp() {
     });
   });
 
-  app.post("/api/auth/send-otp", loginLimiter, (request, response) => {
+  app.post("/api/auth/send-otp", loginLimiter, async (request, response) => {
     const email = normalizeEmail(request.body?.email);
     const explicitPurpose = request.body?.purpose;
     const purpose =
@@ -262,9 +319,42 @@ export function createApp() {
         : "bootstrap");
     if (
       !isValidEmail(email) ||
-      !["bootstrap", "invite", "reset"].includes(purpose)
+      !["bootstrap", "invite", "reset", "shop-signup"].includes(purpose)
     ) {
       response.status(400).json({ error: "Enter a valid email address." });
+      return;
+    }
+
+    if (
+      process.env.NODE_ENV === "production" &&
+      (!mailTransport || !smtpSender)
+    ) {
+      response.status(503).json({
+        error: "Email delivery is not configured. Contact your administrator.",
+      });
+      return;
+    }
+
+    const genericResetMessage =
+      "If an active account exists for this email, a verification code has been sent.";
+    if (
+      purpose === "reset" &&
+      !database
+        .prepare("SELECT 1 FROM users WHERE email = ? AND status = 'active'")
+        .get(email)
+    ) {
+      response.json({ sent: true, message: genericResetMessage });
+      return;
+    }
+    if (
+      purpose === "shop-signup" &&
+      database.prepare("SELECT 1 FROM users WHERE email = ?").get(email)
+    ) {
+      response.json({
+        sent: true,
+        message:
+          "If this email can be registered, a verification code has been sent.",
+      });
       return;
     }
 
@@ -285,8 +375,34 @@ export function createApp() {
       )
       .run(id, email, purpose, hashOtp(otp), expiresAt, now);
 
-    console.log(`[OTP] ${purpose} code for ${email}: ${otp}`);
-    response.json({ sent: true, otp, message: "Verification code sent." });
+    if (mailTransport) {
+      try {
+        await mailTransport.sendMail({
+          from: smtpSender,
+          to: email,
+          subject: "Apna Dhandha verification code",
+          text: `Your Apna Dhandha verification code is ${otp}. It expires in 5 minutes. If you did not request this, ignore this email.`,
+        });
+      } catch (error) {
+        database.prepare("DELETE FROM email_otps WHERE id = ?").run(id);
+        console.error("Email OTP delivery failed.", error);
+        response.status(503).json({
+          error: "Unable to send the verification email. Try again later.",
+        });
+        return;
+      }
+    }
+
+    const result = {
+      sent: true,
+      message:
+        purpose === "reset" ? genericResetMessage : "Verification code sent.",
+    };
+    if (!mailTransport && process.env.NODE_ENV !== "production") {
+      console.log(`[OTP] ${purpose} code for ${email}: ${otp}`);
+      result.otp = otp;
+    }
+    response.json(result);
   });
 
   app.post("/api/auth/verify-otp", loginLimiter, (request, response) => {
@@ -305,7 +421,7 @@ export function createApp() {
 
     if (
       !isValidEmail(email) ||
-      !["bootstrap", "invite", "reset"].includes(purpose)
+      !["bootstrap", "invite", "reset", "shop-signup"].includes(purpose)
     ) {
       response
         .status(400)
@@ -371,6 +487,7 @@ export function createApp() {
 
     const user = {
       id: randomBytes(16).toString("hex"),
+      shopId: randomBytes(16).toString("hex"),
       name,
       shopName,
       email,
@@ -383,15 +500,23 @@ export function createApp() {
     };
 
     try {
+      database.exec("BEGIN IMMEDIATE");
+      database
+        .prepare(
+          "INSERT INTO shops (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)",
+        )
+        .run(user.shopId, shopName, user.now, user.now);
       database
         .prepare(
           `
-          INSERT INTO users (id, name, shop_name, email, phone, password_hash, role, status, email_verified_at, created_at, updated_at)
-          VALUES (@id, @name, @shopName, @email, @phone, @passwordHash, @role, @status, @emailVerifiedAt, @now, @now)
+          INSERT INTO users (id, shop_id, name, shop_name, email, phone, password_hash, role, status, email_verified_at, created_at, updated_at)
+          VALUES (@id, @shopId, @name, @shopName, @email, @phone, @passwordHash, @role, @status, @emailVerifiedAt, @now, @now)
         `,
         )
         .run(user);
+      database.exec("COMMIT");
     } catch (error) {
+      if (database.isTransaction) database.exec("ROLLBACK");
       if (error.code === "SQLITE_CONSTRAINT_UNIQUE") {
         response
           .status(409)
@@ -404,6 +529,97 @@ export function createApp() {
     await createAuthenticatedSession(request, { id: user.id });
     response.status(201).json({
       user: safeUser({ ...user, created_at: user.now, updated_at: user.now }),
+    });
+  });
+
+  app.post("/api/auth/signup", loginLimiter, async (request, response) => {
+    const shopName =
+      typeof request.body?.shopName === "string"
+        ? request.body.shopName.trim()
+        : "";
+    const name =
+      typeof request.body?.name === "string" ? request.body.name.trim() : "";
+    const email = normalizeEmail(request.body?.email);
+    const password = request.body?.password;
+    const otp = request.body?.otp;
+    if (
+      !shopName ||
+      shopName.length > 120 ||
+      !name ||
+      name.length > 120 ||
+      !isValidEmail(email) ||
+      !isValidPassword(password)
+    ) {
+      response.status(400).json({
+        error:
+          "Provide a shop name, owner name, valid email, and password of at least 12 characters.",
+      });
+      return;
+    }
+    if (database.prepare("SELECT 1 FROM users WHERE email = ?").get(email)) {
+      response.status(409).json({
+        error:
+          "An account with this email already exists. Sign in or accept a team invitation.",
+      });
+      return;
+    }
+    if (!consumeOtp(email, "shop-signup", otp)) {
+      response.status(400).json({
+        error:
+          "Verify your email with a valid, unexpired code before creating a shop.",
+      });
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const user = {
+      id: randomBytes(16).toString("hex"),
+      shopId: randomBytes(16).toString("hex"),
+      name,
+      shopName,
+      email,
+      phone: "",
+      passwordHash: await bcrypt.hash(password, 12),
+      role: "Admin",
+      status: "active",
+      emailVerifiedAt: now,
+      now,
+    };
+
+    try {
+      database.exec("BEGIN IMMEDIATE");
+      database
+        .prepare(
+          "INSERT INTO shops (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)",
+        )
+        .run(user.shopId, shopName, now, now);
+      database
+        .prepare(
+          `INSERT INTO users
+           (id, shop_id, name, shop_name, email, phone, password_hash, role, status, email_verified_at, created_at, updated_at)
+           VALUES (@id, @shopId, @name, @shopName, @email, @phone, @passwordHash, @role, @status, @emailVerifiedAt, @now, @now)`,
+        )
+        .run(user);
+      database.exec("COMMIT");
+    } catch (error) {
+      if (database.isTransaction) database.exec("ROLLBACK");
+      if (error.code === "SQLITE_CONSTRAINT_UNIQUE") {
+        response.status(409).json({
+          error: "An account with this email already exists.",
+        });
+        return;
+      }
+      throw error;
+    }
+
+    await createAuthenticatedSession(request, { id: user.id });
+    response.status(201).json({
+      user: safeUser({
+        ...user,
+        shop_id: user.shopId,
+        created_at: user.now,
+        updated_at: user.now,
+      }),
     });
   });
 
@@ -576,8 +792,8 @@ export function createApp() {
           .get(invitation.email)
       ) {
         database
-          .prepare("DELETE FROM invitations WHERE id = ?")
-          .run(invitation.id);
+          .prepare("DELETE FROM invitations WHERE id = ? AND shop_id = ?")
+          .run(invitation.id, invitation.shop_id);
         response
           .status(409)
           .json({ error: "An account with this email already exists." });
@@ -586,11 +802,12 @@ export function createApp() {
 
       const user = {
         id: randomBytes(16).toString("hex"),
+        shopId: invitation.shop_id,
         name,
         shopName:
           database
-            .prepare("SELECT shop_name FROM users WHERE id = ?")
-            .get(invitation.invited_by)?.shop_name || "",
+            .prepare("SELECT name FROM shops WHERE id = ?")
+            .get(invitation.shop_id)?.name || "",
         email: invitation.email,
         phone,
         passwordHash: await bcrypt.hash(password, 12),
@@ -604,14 +821,14 @@ export function createApp() {
         database
           .prepare(
             `
-          INSERT INTO users (id, name, shop_name, email, phone, password_hash, role, status, email_verified_at, created_at, updated_at)
-          VALUES (@id, @name, @shopName, @email, @phone, @passwordHash, @role, @status, @emailVerifiedAt, @now, @now)
+          INSERT INTO users (id, shop_id, name, shop_name, email, phone, password_hash, role, status, email_verified_at, created_at, updated_at)
+          VALUES (@id, @shopId, @name, @shopName, @email, @phone, @passwordHash, @role, @status, @emailVerifiedAt, @now, @now)
         `,
           )
           .run(user);
         database
-          .prepare("DELETE FROM invitations WHERE id = ?")
-          .run(invitation.id);
+          .prepare("DELETE FROM invitations WHERE id = ? AND shop_id = ?")
+          .run(invitation.id, invitation.shop_id);
         database.exec("COMMIT");
       } catch (error) {
         database.exec("ROLLBACK");
@@ -625,26 +842,33 @@ export function createApp() {
     },
   );
 
-  app.get("/api/team/users", requireAuth, requireAdmin, (request, response) => {
-    const users = database
-      .prepare(`SELECT ${SAFE_USER_FIELDS} FROM users ORDER BY created_at DESC`)
-      .all();
-    response.json({ users: users.map(safeUser) });
-  });
+  app.get(
+    "/api/team/users",
+    requireAuth,
+    requireTeamAccess,
+    (request, response) => {
+      const users = database
+        .prepare(
+          `SELECT ${SAFE_USER_FIELDS} FROM users WHERE shop_id = ? ORDER BY created_at DESC`,
+        )
+        .all(request.user.shop_id);
+      response.json({ users: users.map(safeUser) });
+    },
+  );
 
   app.get(
     "/api/team/invitations",
     requireAuth,
-    requireAdmin,
+    requireTeamAccess,
     (request, response) => {
       const invitations = database
         .prepare(
           `
         SELECT id, email, role, created_at, expires_at
-        FROM invitations WHERE expires_at > ? ORDER BY created_at DESC
+        FROM invitations WHERE shop_id = ? AND expires_at > ? ORDER BY created_at DESC
       `,
         )
-        .all(Date.now());
+        .all(request.user.shop_id, Date.now());
       response.json({ invitations });
     },
   );
@@ -652,13 +876,19 @@ export function createApp() {
   app.post(
     "/api/team/invitations",
     requireAuth,
-    requireAdmin,
+    requireTeamAccess,
     inviteLimiter,
     (request, response) => {
       const email = normalizeEmail(request.body?.email);
       const role = request.body?.role;
       if (!isValidEmail(email) || !ROLES.has(role)) {
         response.status(400).json({ error: "Enter a valid email and role." });
+        return;
+      }
+      if (request.user.role === "Manager" && role !== "Staff") {
+        response.status(403).json({
+          error: "Managers can invite Staff accounts only.",
+        });
         return;
       }
       if (database.prepare("SELECT 1 FROM users WHERE email = ?").get(email)) {
@@ -672,16 +902,19 @@ export function createApp() {
       const id = randomBytes(16).toString("hex");
       const createdAt = new Date().toISOString();
       const expiresAt = Date.now() + 7 * 24 * 60 * 60 * 1000;
-      database.prepare("DELETE FROM invitations WHERE email = ?").run(email);
+      database
+        .prepare("DELETE FROM invitations WHERE email = ? AND shop_id = ?")
+        .run(email, request.user.shop_id);
       database
         .prepare(
           `
-          INSERT INTO invitations (id, email, role, token_hash, invited_by, expires_at, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO invitations (id, shop_id, email, role, token_hash, invited_by, expires_at, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         `,
         )
         .run(
           id,
+          request.user.shop_id,
           email,
           role,
           hashToken(token),
@@ -712,11 +945,11 @@ export function createApp() {
   app.delete(
     "/api/team/invitations/:id",
     requireAuth,
-    requireAdmin,
+    requireTeamAccess,
     (request, response) => {
       database
-        .prepare("DELETE FROM invitations WHERE id = ?")
-        .run(request.params.id);
+        .prepare("DELETE FROM invitations WHERE id = ? AND shop_id = ?")
+        .run(request.params.id, request.user.shop_id);
       response.status(204).end();
     },
   );
@@ -724,13 +957,19 @@ export function createApp() {
   app.post(
     "/api/team/users/:id/password-reset",
     requireAuth,
-    requireAdmin,
+    requireTeamAccess,
     inviteLimiter,
     (request, response) => {
       const user = database
-        .prepare("SELECT id, email, status FROM users WHERE id = ?")
-        .get(request.params.id);
-      if (!user || user.status !== "active") {
+        .prepare(
+          "SELECT id, email, status, role FROM users WHERE id = ? AND shop_id = ?",
+        )
+        .get(request.params.id, request.user.shop_id);
+      if (
+        !user ||
+        user.status !== "active" ||
+        (request.user.role === "Manager" && user.role !== "Staff")
+      ) {
         response.status(404).json({ error: "Active team member not found." });
         return;
       }
@@ -839,14 +1078,74 @@ export function createApp() {
     },
   );
 
+  app.post(
+    "/api/password-resets/otp",
+    loginLimiter,
+    async (request, response) => {
+      const email = normalizeEmail(request.body?.email);
+      const otp = request.body?.otp;
+      const password = request.body?.password;
+      if (!isValidEmail(email) || !isValidPassword(password)) {
+        response.status(400).json({
+          error:
+            "Enter a valid email and choose a password of at least 12 characters.",
+        });
+        return;
+      }
+
+      const user = database
+        .prepare("SELECT id FROM users WHERE email = ? AND status = 'active'")
+        .get(email);
+      if (!user || !consumeOtp(email, "reset", otp)) {
+        response.status(400).json({
+          error:
+            "The verification code is incorrect or expired, or the account is unavailable.",
+        });
+        return;
+      }
+
+      const passwordHash = await bcrypt.hash(password, 12);
+      database.exec("BEGIN IMMEDIATE");
+      try {
+        database
+          .prepare(
+            "UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?",
+          )
+          .run(passwordHash, new Date().toISOString(), user.id);
+        database
+          .prepare("DELETE FROM password_resets WHERE user_id = ?")
+          .run(user.id);
+        database.exec("COMMIT");
+      } catch (error) {
+        database.exec("ROLLBACK");
+        throw error;
+      }
+
+      for (const row of database
+        .prepare("SELECT sid, session_json FROM sessions")
+        .all()) {
+        try {
+          if (JSON.parse(row.session_json).userId === user.id) {
+            database.prepare("DELETE FROM sessions WHERE sid = ?").run(row.sid);
+          }
+        } catch {
+          database.prepare("DELETE FROM sessions WHERE sid = ?").run(row.sid);
+        }
+      }
+      response.status(204).end();
+    },
+  );
+
   app.patch(
     "/api/team/users/:id",
     requireAuth,
-    requireAdmin,
+    requireTeamAccess,
     (request, response) => {
       const target = database
-        .prepare(`SELECT ${SAFE_USER_FIELDS} FROM users WHERE id = ?`)
-        .get(request.params.id);
+        .prepare(
+          `SELECT ${SAFE_USER_FIELDS} FROM users WHERE id = ? AND shop_id = ?`,
+        )
+        .get(request.params.id, request.user.shop_id);
       if (!target) {
         response.status(404).json({ error: "Team member not found." });
         return;
@@ -862,6 +1161,15 @@ export function createApp() {
         typeof request.body?.phone === "string"
           ? request.body.phone.trim()
           : target.phone;
+      if (
+        request.user.role === "Manager" &&
+        (target.role !== "Staff" || role !== "Staff")
+      ) {
+        response.status(403).json({
+          error: "Managers can edit Staff accounts only.",
+        });
+        return;
+      }
       if (
         !ROLES.has(role) ||
         !["active", "inactive"].includes(status) ||
@@ -880,9 +1188,9 @@ export function createApp() {
       ) {
         const activeAdmins = database
           .prepare(
-            "SELECT COUNT(*) AS count FROM users WHERE role = 'Admin' AND status = 'active'",
+            "SELECT COUNT(*) AS count FROM users WHERE shop_id = ? AND role = 'Admin' AND status = 'active'",
           )
-          .get().count;
+          .get(request.user.shop_id).count;
         if (activeAdmins <= 1) {
           response.status(409).json({
             error:
@@ -927,9 +1235,17 @@ export function createApp() {
       return;
     }
     const row = database
-      .prepare("SELECT value_json FROM collections WHERE collection_key = ?")
-      .get(request.params.collection);
-    response.json({ value: row ? JSON.parse(row.value_json) : null });
+      .prepare(
+        "SELECT value_json FROM collections WHERE shop_id = ? AND collection_key = ?",
+      )
+      .get(request.user.shop_id, request.params.collection);
+    const shop = database
+      .prepare("SELECT is_legacy FROM shops WHERE id = ?")
+      .get(request.user.shop_id);
+    response.json({
+      value: row ? JSON.parse(row.value_json) : null,
+      allowLegacyImport: !row && shop?.is_legacy === 1,
+    });
   });
 
   app.put("/api/data/:collection", requireAuth, (request, response) => {
@@ -955,14 +1271,19 @@ export function createApp() {
     database
       .prepare(
         `
-        INSERT INTO collections (collection_key, value_json, updated_at)
-        VALUES (?, ?, ?)
-        ON CONFLICT(collection_key) DO UPDATE SET
+        INSERT INTO collections (shop_id, collection_key, value_json, updated_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(shop_id, collection_key) DO UPDATE SET
           value_json = excluded.value_json,
           updated_at = excluded.updated_at
       `,
       )
-      .run(collection, JSON.stringify(request.body.value), now);
+      .run(
+        request.user.shop_id,
+        collection,
+        JSON.stringify(request.body.value),
+        now,
+      );
     response.json({ saved: true, updatedAt: now });
   });
 

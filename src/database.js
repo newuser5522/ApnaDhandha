@@ -27,6 +27,18 @@ const readCollection = async (key) => {
   });
 };
 
+const deleteCollection = async (key) => {
+  const database = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const request = database
+      .transaction(STORE_NAME, "readwrite")
+      .objectStore(STORE_NAME)
+      .delete(key);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+  });
+};
+
 const writeCollection = async (key, value) => {
   const database = await openDatabase();
   return new Promise((resolve, reject) => {
@@ -39,7 +51,7 @@ const writeCollection = async (key, value) => {
   });
 };
 
-export function useDatabaseCollection(key, initialValue) {
+export function useDatabaseCollection(key, initialValue, shopId) {
   const [value, setValue] = useState(initialValue);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
@@ -57,10 +69,18 @@ export function useDatabaseCollection(key, initialValue) {
         const result = await response.json();
         let nextValue = result.value;
         if (nextValue === null) {
-          const localValue = await readCollection(key).catch(() => undefined);
+          const scopedKey = `${shopId}:${key}`;
+          let localValue = await readCollection(scopedKey).catch(
+            () => undefined,
+          );
+          let importedLegacyValue = false;
+          if (localValue === undefined && result.allowLegacyImport) {
+            localValue = await readCollection(key).catch(() => undefined);
+            importedLegacyValue = localValue !== undefined;
+          }
           nextValue = localValue === undefined ? initialValue : localValue;
 
-          if (localValue !== undefined) {
+          if (importedLegacyValue) {
             const migrationResponse = await fetch(
               `/api/data/${encodeURIComponent(key)}`,
               {
@@ -73,6 +93,7 @@ export function useDatabaseCollection(key, initialValue) {
             if (!migrationResponse.ok) {
               throw new Error("Could not migrate existing browser data.");
             }
+            await deleteCollection(key);
           }
         }
 

@@ -21,7 +21,7 @@ const EMPTY_FORM = {
 
 const ROLES = ["Admin", "Manager", "Staff"];
 
-const TeamComponent = () => {
+const TeamComponent = ({ currentUser }) => {
   const [users, setUsers] = useState([]);
   const [invitations, setInvitations] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -36,6 +36,7 @@ const TeamComponent = () => {
   const [inviteUrl, setInviteUrl] = useState("");
   const [passwordResetLink, setPasswordResetLink] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const editableRoles = currentUser?.role === "Manager" ? ["Staff"] : ROLES;
 
   const loadTeam = async () => {
     setLoading(true);
@@ -337,7 +338,7 @@ const TeamComponent = () => {
                 }
                 className="w-full rounded-lg border border-slate-300 px-3 py-2"
               >
-                {ROLES.map((role) => (
+                {editableRoles.map((role) => (
                   <option key={role}>{role}</option>
                 ))}
               </select>
