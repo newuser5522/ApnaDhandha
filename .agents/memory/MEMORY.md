@@ -1,0 +1,1 @@
+- [Customer billing rules](customer-billing-rules.md) — required mobile numbers, discount-before-GST, shared receipts, and warn-but-allow credit limits.

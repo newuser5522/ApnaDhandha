@@ -213,12 +213,13 @@ function drawTableHeader(pdf, y) {
   return y + 10;
 }
 
-function drawItemRow(pdf, item, index, y) {
+function drawItemRow(pdf, item, index, y, lineTotals) {
   const quantity = Number(item.qty) || 0;
   const price = Number(item.price) || 0;
-  const taxable = quantity * price;
+  const taxable =
+    lineTotals?.taxableValue ?? quantity * price;
   const rate = getItemGstRate(item);
-  const tax = (taxable * rate) / 100;
+  const tax = lineTotals?.gstAmount ?? (taxable * rate) / 100;
   const descriptionLines = pdf.splitTextToSize(display(item.name), 43);
   const rowHeight = Math.max(9, descriptionLines.length * 3.2 + 4);
   if (index % 2 === 1) {
@@ -262,7 +263,7 @@ function drawItemRow(pdf, item, index, y) {
 
 function drawSummary(pdf, document, totals, y) {
   const taxRows = new Map();
-  for (const item of document.items || []) {
+  for (const [index, item] of (document.items || []).entries()) {
     const key = `${display(item.hsnSac)}|${getItemGstRate(item)}`;
     const row = taxRows.get(key) || {
       hsn: display(item.hsnSac),
@@ -270,9 +271,13 @@ function drawSummary(pdf, document, totals, y) {
       taxable: 0,
       tax: 0,
     };
-    const taxable = (Number(item.qty) || 0) * (Number(item.price) || 0);
+    const calculatedLine = totals.lineTotals[index];
+    const taxable =
+      calculatedLine?.taxableValue ??
+      (Number(item.qty) || 0) * (Number(item.price) || 0);
     row.taxable += taxable;
-    row.tax += (taxable * row.rate) / 100;
+    row.tax +=
+      calculatedLine?.gstAmount ?? (taxable * row.rate) / 100;
     taxRows.set(key, row);
   }
 
@@ -316,7 +321,7 @@ function drawSummary(pdf, document, totals, y) {
   pdf.rect(MARGIN, rowY, leftWidth, taxRowHeight, "F");
   pdf.setFont("helvetica", "bold");
   pdf.text("Total", MARGIN + 2, rowY + 5.2);
-  pdf.text(totals.subtotal.toFixed(2), MARGIN + 48, rowY + 5.2, {
+  pdf.text(totals.taxableSubtotal.toFixed(2), MARGIN + 48, rowY + 5.2, {
     align: "right",
   });
   pdf.text((totals.gstAmount / 2).toFixed(2), MARGIN + 72, rowY + 5.2, {
@@ -331,9 +336,16 @@ function drawSummary(pdf, document, totals, y) {
   rowY += taxRowHeight;
 
   const totalRows = [
-    ["Taxable value", currency(totals.subtotal)],
+    ["Subtotal", currency(totals.subtotal)],
+    ...(totals.discountAmount > 0
+      ? [["Discount", `-${currency(totals.discountAmount)}`]]
+      : []),
+    ["Taxable value", currency(totals.taxableSubtotal)],
     ["GST", currency(totals.gstAmount)],
-    ["Round off", currency(totals.total - totals.subtotal - totals.gstAmount)],
+    [
+      "Round off",
+      currency(totals.total - totals.taxableSubtotal - totals.gstAmount),
+    ],
   ];
   let totalY = y;
   totalRows.forEach(([label, value]) => {
@@ -415,7 +427,10 @@ function drawFooter(pdf, document, y) {
 
 export function downloadDocumentPdf(document, kind) {
   const pdf = new jsPDF({ unit: "mm", format: "a4" });
-  const totals = calculateTaxTotals(document.items || []);
+  const totals = calculateTaxTotals(document.items || [], {
+    discountType: document.discountType,
+    discountValue: document.discountValue,
+  });
   let y = drawPageHeader(pdf, document, kind);
   y = drawTableHeader(pdf, y);
 
@@ -429,10 +444,10 @@ export function downloadDocumentPdf(document, kind) {
       y = drawPageHeader(pdf, document, kind, true);
       y = drawTableHeader(pdf, y);
     }
-    y += drawItemRow(pdf, item, index, y);
+    y += drawItemRow(pdf, item, index, y, totals.lineTotals[index]);
   }
 
-  if (y > 202) {
+  if (y > 185) {
     pdf.addPage();
     y = drawPageHeader(pdf, document, kind, true);
   }

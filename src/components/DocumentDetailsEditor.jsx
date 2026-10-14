@@ -1,7 +1,15 @@
 const inputClassName =
   "w-full min-w-0 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400";
 
-function TextField({ label, name, value, onChange, type = "text" }) {
+function TextField({
+  label,
+  name,
+  value,
+  onChange,
+  type = "text",
+  readOnly = false,
+  required = false,
+}) {
   return (
     <label className="block min-w-0 space-y-1 text-sm">
       <span className="font-medium text-slate-700">{label}</span>
@@ -11,8 +19,10 @@ function TextField({ label, name, value, onChange, type = "text" }) {
         aria-label={label}
         placeholder={label}
         value={value ?? ""}
+        readOnly={readOnly}
+        required={required}
         onChange={(event) => onChange(name, event.target.value)}
-        className={inputClassName}
+        className={`${inputClassName} ${readOnly ? "bg-slate-100 text-slate-600" : ""}`}
       />
     </label>
   );
@@ -29,7 +39,11 @@ function DetailsSection({ title, children }) {
   );
 }
 
-export default function DocumentDetailsEditor({ formData, onChange }) {
+export default function DocumentDetailsEditor({
+  formData,
+  onChange,
+  customerLocked = false,
+}) {
   return (
     <div className="space-y-4">
       <DetailsSection title="Your business">
@@ -85,6 +99,8 @@ export default function DocumentDetailsEditor({ formData, onChange }) {
           name="customer"
           value={formData.customer}
           onChange={onChange}
+          readOnly={customerLocked}
+          required={customerLocked}
         />
         <TextField
           label="Billing address"
@@ -110,6 +126,8 @@ export default function DocumentDetailsEditor({ formData, onChange }) {
           value={formData.customerPhone}
           onChange={onChange}
           type="tel"
+          readOnly={customerLocked}
+          required={customerLocked}
         />
         <TextField
           label="Shipping address"
