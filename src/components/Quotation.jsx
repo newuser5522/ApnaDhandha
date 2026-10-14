@@ -6,6 +6,8 @@ import {
 } from "../utils/invoices.js";
 import LineItemsEditor from "./LineItemsEditor.jsx";
 import DocumentDetailsEditor from "./DocumentDetailsEditor.jsx";
+import CustomerAccountSelect from "./CustomerAccountSelect.jsx";
+import DiscountEditor from "./DiscountEditor.jsx";
 import { downloadDocumentPdf } from "../utils/documentPdf.js";
 import { ArrowRight, Download, Plus, Trash, Pencil } from "lucide-react";
 
@@ -17,6 +19,7 @@ const getDateAfterDays = (days) => {
 
 const createEmptyQuotationForm = () => ({
   quoteNo: "",
+  customerId: "",
   customer: "",
   customerAddress: "",
   customerGstin: "",
@@ -39,6 +42,8 @@ const createEmptyQuotationForm = () => ({
   bankIfsc: "",
   upiId: "",
   termsConditions: "",
+  discountType: "percentage",
+  discountValue: "",
   items: [{ name: "", hsnSac: "", unit: "", qty: "", price: "", gstRate: "" }],
   notes: "",
   date: new Date().toISOString().split("T")[0],
@@ -50,6 +55,8 @@ const QuotationComponent = ({
   inventory = [],
   quotations = [],
   setQuotations,
+  customers = [],
+  onOpenCustomers,
   readOnly = false,
 }) => {
   const [showForm, setShowForm] = useState(false);
@@ -72,11 +79,31 @@ const QuotationComponent = ({
       price: Number(item.price) || 0,
       gstRate: getItemGstRate(item),
     }));
-    const { subtotal, gstAmount, total } = calculateTaxTotals(items);
+    const customer = customers.find(
+      (candidate) => String(candidate.id) === String(formData.customerId),
+    );
+    if (!customer) {
+      alert("Select a customer account before saving this quotation.");
+      return;
+    }
+    const discountType = formData.discountType || "percentage";
+    const discountValue = Number(formData.discountValue) || 0;
+    const { subtotal, discountAmount, taxableSubtotal, gstAmount, total } =
+      calculateTaxTotals(items, { discountType, discountValue });
     const savedDocument = {
       ...formData,
+      customerId: customer.id,
+      customer: customer.name,
+      customerPhone: customer.phone,
+      customerAddress: formData.customerAddress || customer.address || "",
+      customerGstin: formData.customerGstin || customer.gstin || "",
+      customerState: formData.customerState || customer.state || "",
       items,
       subtotal,
+      discountType,
+      discountValue,
+      discountAmount,
+      taxableSubtotal,
       gstAmount,
       total,
       date: formData.date || new Date().toISOString().split("T")[0],
@@ -124,6 +151,21 @@ const QuotationComponent = ({
 
   const updateFormField = (name, value) => {
     setFormData((current) => ({ ...current, [name]: value }));
+  };
+
+  const handleCustomerSelection = (customerId) => {
+    const customer = customers.find(
+      (candidate) => String(candidate.id) === String(customerId),
+    );
+    setFormData((current) => ({
+      ...current,
+      customerId: customer?.id ?? "",
+      customer: customer?.name ?? "",
+      customerPhone: customer?.phone ?? "",
+      customerAddress: customer?.address ?? "",
+      customerGstin: customer?.gstin ?? "",
+      customerState: customer?.state ?? "",
+    }));
   };
 
   return (
@@ -192,9 +234,16 @@ const QuotationComponent = ({
                 />
               </label>
             </div>
+            <CustomerAccountSelect
+              customers={customers}
+              value={formData.customerId}
+              onChange={handleCustomerSelection}
+              onManageCustomers={onOpenCustomers}
+            />
             <DocumentDetailsEditor
               formData={formData}
               onChange={updateFormField}
+              customerLocked
             />
 
             <LineItemsEditor
@@ -210,6 +259,12 @@ const QuotationComponent = ({
               }
               inventory={inventory}
               listId="quotation-inventory-skus"
+            />
+            <DiscountEditor
+              items={formData.items}
+              discountType={formData.discountType}
+              discountValue={formData.discountValue}
+              onChange={updateFormField}
             />
 
             <div className="flex gap-2">
@@ -279,6 +334,20 @@ const QuotationComponent = ({
                 {Number(quotation.subtotal || 0).toLocaleString("en-IN", {
                   minimumFractionDigits: 2,
                 })}
+              </p>
+              <p className="text-sm text-slate-600">
+                Discount: -₹
+                {Number(quotation.discountAmount || 0).toLocaleString("en-IN", {
+                  minimumFractionDigits: 2,
+                })}
+              </p>
+              <p className="text-sm text-slate-600">
+                Taxable value: ₹
+                {Number(
+                  quotation.taxableSubtotal ??
+                    (Number(quotation.subtotal || 0) -
+                      Number(quotation.discountAmount || 0)),
+                ).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
               </p>
               <p className="text-sm text-slate-600">
                 GST: ₹

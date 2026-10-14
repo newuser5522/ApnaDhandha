@@ -6,6 +6,7 @@ import DashboardComponent from "./components/Dashboard.jsx";
 import InventoryComponent from "./components/Inventory.jsx";
 import QuotationComponent from "./components/Quotation.jsx";
 import InvoiceComponent from "./components/Invoice.jsx";
+import CustomersComponent from "./components/Customers.jsx";
 import TeamComponent from "./components/Team.jsx";
 import {
   BarChart3,
@@ -14,6 +15,7 @@ import {
   DollarSign,
   Home,
   Users,
+  UserRound,
   LogOut,
 } from "lucide-react";
 
@@ -35,8 +37,15 @@ function AuthenticatedApp() {
     useDatabaseCollection("invoices", []);
   const [quotations, setQuotations, quotationsLoaded, quotationsError] =
     useDatabaseCollection("quotations", []);
+  const [customers, setCustomers, customersLoaded, customersError] =
+    useDatabaseCollection("customers", []);
 
-  if (!inventoryLoaded || !invoicesLoaded || !quotationsLoaded) {
+  if (
+    !inventoryLoaded ||
+    !invoicesLoaded ||
+    !quotationsLoaded ||
+    !customersLoaded
+  ) {
     return (
       <div className="grid min-h-screen place-items-center bg-slate-100 text-sm text-slate-600">
         Loading your company workspace…
@@ -49,7 +58,11 @@ function AuthenticatedApp() {
       !quote ||
       invoices.some((invoice) => invoice.sourceQuotationId === quote.id)
     ) {
-      return;
+      return false;
+    }
+    if (!quote.customerId) {
+      alert("Edit this quotation and select a customer account before converting it.");
+      return false;
     }
 
     const dueDate = new Date();
@@ -73,6 +86,7 @@ function AuthenticatedApp() {
     setInvoices((currentInvoices) => [...currentInvoices, invoice]);
     setNewQuoteData(invoice);
     setActiveTab("invoices");
+    return true;
   };
 
   const appData = {
@@ -125,6 +139,12 @@ function AuthenticatedApp() {
             <Package size={18} /> Inventory
           </button>
           <button
+            onClick={() => setActiveTab("customers")}
+            className={`flex items-center gap-2 rounded-xl px-4 py-2.5 font-semibold transition ${activeTab === "customers" ? "bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-md" : "text-slate-600 hover:bg-slate-100"}`}
+          >
+            <UserRound size={18} /> Customers
+          </button>
+          <button
             onClick={() => setActiveTab("quotations")}
             className={`flex items-center gap-2 rounded-xl px-4 py-2.5 font-semibold transition ${activeTab === "quotations" ? "bg-gradient-to-r from-violet-500 to-purple-600 text-white shadow-md" : "text-slate-600 hover:bg-slate-100"}`}
           >
@@ -138,12 +158,18 @@ function AuthenticatedApp() {
           </button>
         </div>
 
-        {(inventoryError || invoicesError || quotationsError) && (
+        {(inventoryError ||
+          invoicesError ||
+          quotationsError ||
+          customersError) && (
           <p
             role="alert"
             className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-800"
           >
-            {inventoryError || invoicesError || quotationsError}
+            {inventoryError ||
+              invoicesError ||
+              quotationsError ||
+              customersError}
           </p>
         )}
 
@@ -162,15 +188,33 @@ function AuthenticatedApp() {
               }}
             />
           )}
+          {activeTab === "customers" && (
+            <CustomersComponent
+              customers={customers}
+              setCustomers={setCustomers}
+              invoices={invoices}
+              setInvoices={setInvoices}
+            />
+          )}
           {activeTab === "quotations" && (
             <QuotationComponent
               inventory={inventory}
               quotations={quotations}
               setQuotations={setQuotations}
+              customers={customers}
+              onOpenCustomers={() => setActiveTab("customers")}
               readOnly={false}
               onConvertToInvoice={(quote) => {
-                handleConvertQuoteToInvoice(quote);
-                alert("Quote converted to invoice! Switched to invoices tab.");
+                if (handleConvertQuoteToInvoice(quote)) {
+                  setQuotations((currentQuotations) =>
+                    currentQuotations.map((currentQuote) =>
+                      currentQuote.id === quote.id
+                        ? { ...currentQuote, status: "converted" }
+                        : currentQuote,
+                    ),
+                  );
+                  alert("Quote converted to invoice! Switched to invoices tab.");
+                }
               }}
             />
           )}
@@ -180,6 +224,9 @@ function AuthenticatedApp() {
               setInvoices={setInvoices}
               newQuoteData={newQuoteData}
               inventory={inventory}
+              customers={customers}
+              setCustomers={setCustomers}
+              onOpenCustomers={() => setActiveTab("customers")}
               readOnly={false}
             />
           )}

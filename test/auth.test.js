@@ -56,7 +56,7 @@ test("invitation-only authentication protects team and shared business data", as
   assert.equal(otpVerified.response.status, 200);
   assert.equal(otpVerified.payload.verified, true);
 
-  const bootstrap = await request("/api/auth/bootstrap", {
+  const bootstrapWithoutPhone = await request("/api/auth/bootstrap", {
     method: "POST",
     body: {
       bootstrapToken: process.env.BOOTSTRAP_ADMIN_TOKEN,
@@ -67,9 +67,38 @@ test("invitation-only authentication protects team and shared business data", as
       otp: otpRequest.payload.otp,
     },
   });
+  assert.equal(bootstrapWithoutPhone.response.status, 400);
+
+  const bootstrapWithInvalidPhone = await request("/api/auth/bootstrap", {
+    method: "POST",
+    body: {
+      bootstrapToken: process.env.BOOTSTRAP_ADMIN_TOKEN,
+      shopName: "Acme Mart",
+      name: "Workspace Admin",
+      email: "admin@example.test",
+      phone: "12345",
+      password: "test-admin-password-2026",
+      otp: otpRequest.payload.otp,
+    },
+  });
+  assert.equal(bootstrapWithInvalidPhone.response.status, 400);
+
+  const bootstrap = await request("/api/auth/bootstrap", {
+    method: "POST",
+    body: {
+      bootstrapToken: process.env.BOOTSTRAP_ADMIN_TOKEN,
+      shopName: "Acme Mart",
+      name: "Workspace Admin",
+      email: "admin@example.test",
+      phone: "+91 9876543210",
+      password: "test-admin-password-2026",
+      otp: otpRequest.payload.otp,
+    },
+  });
   assert.equal(bootstrap.response.status, 201);
   assert.equal(bootstrap.payload.user.role, "Admin");
   assert.equal(bootstrap.payload.user.shopName, "Acme Mart");
+  assert.equal(bootstrap.payload.user.phone, "+91 9876543210");
   assert.equal(bootstrap.payload.user.password_hash, undefined);
   assert.ok(bootstrap.sessionCookie);
   assert.match(bootstrap.setCookie.join(";"), /HttpOnly/i);
@@ -129,6 +158,33 @@ test("invitation-only authentication protects team and shared business data", as
     cookie: bootstrap.sessionCookie,
   });
   assert.equal(readCollection.payload.value[0].sku, "TEST-1");
+
+  const invalidCustomerWrite = await request("/api/data/customers", {
+    method: "PUT",
+    cookie: accepted.sessionCookie,
+    body: { value: [{ id: 1, name: "Missing phone" }] },
+  });
+  assert.equal(invalidCustomerWrite.response.status, 400);
+
+  const writeCustomerCollection = await request("/api/data/customers", {
+    method: "PUT",
+    cookie: accepted.sessionCookie,
+    body: {
+      value: [
+        {
+          id: 1,
+          name: "Test Customer",
+          phone: "555-0100",
+          payments: [],
+        },
+      ],
+    },
+  });
+  assert.equal(writeCustomerCollection.response.status, 200);
+  const readCustomerCollection = await request("/api/data/customers", {
+    cookie: bootstrap.sessionCookie,
+  });
+  assert.equal(readCustomerCollection.payload.value[0].name, "Test Customer");
 
   const adminUsers = await request("/api/team/users", {
     cookie: bootstrap.sessionCookie,

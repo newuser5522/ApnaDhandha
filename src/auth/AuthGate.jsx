@@ -453,12 +453,14 @@ function AuthenticationScreen({
               </label>
             )}
 
-            {isInvite && (
+            {(isSetup || isInvite) && (
               <label className="block space-y-1 text-sm">
-                <span>Phone (optional)</span>
+                <span>Mobile number</span>
                 <input
                   type="tel"
                   autoComplete="tel"
+                  maxLength={40}
+                  required
                   value={form.phone}
                   onChange={(event) =>
                     setForm({ ...form, phone: event.target.value })

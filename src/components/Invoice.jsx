@@ -9,8 +9,16 @@ import {
 } from "../utils/invoices.js";
 import LineItemsEditor from "./LineItemsEditor.jsx";
 import DocumentDetailsEditor from "./DocumentDetailsEditor.jsx";
+import CustomerAccountSelect from "./CustomerAccountSelect.jsx";
+import DiscountEditor from "./DiscountEditor.jsx";
 import { downloadDocumentPdf } from "../utils/documentPdf.js";
 import { Plus, Download, Trash, CreditCard, Pencil } from "lucide-react";
+import {
+  addInvoicePaymentToCustomer,
+  getCustomerAdvance,
+  getCustomerOutstanding,
+  releaseInvoiceAllocations,
+} from "../utils/customerLedger.js";
 
 const getDateAfterDays = (days) => {
   const date = new Date();
@@ -20,6 +28,7 @@ const getDateAfterDays = (days) => {
 
 const createEmptyInvoiceForm = () => ({
   invoiceNo: "",
+  customerId: "",
   customer: "",
   customerAddress: "",
   customerGstin: "",
@@ -42,6 +51,8 @@ const createEmptyInvoiceForm = () => ({
   bankIfsc: "",
   upiId: "",
   termsConditions: "",
+  discountType: "percentage",
+  discountValue: "",
   items: [{ name: "", hsnSac: "", unit: "", qty: "", price: "", gstRate: "" }],
   paymentTerms: "NET 30",
   notes: "",
@@ -54,6 +65,9 @@ const InvoiceComponent = ({
   setInvoices,
   newQuoteData,
   inventory = [],
+  customers = [],
+  setCustomers,
+  onOpenCustomers,
   readOnly = false,
 }) => {
   const [showForm, setShowForm] = useState(false);
@@ -101,7 +115,17 @@ const InvoiceComponent = ({
       price: Number(item.price) || 0,
       gstRate: getItemGstRate(item),
     }));
-    const { subtotal, gstAmount, total } = calculateTaxTotals(items);
+    const customer = customers.find(
+      (candidate) => String(candidate.id) === String(formData.customerId),
+    );
+    if (!customer) {
+      alert("Select a customer account before saving this invoice.");
+      return;
+    }
+    const discountType = formData.discountType || "percentage";
+    const discountValue = Number(formData.discountValue) || 0;
+    const { subtotal, discountAmount, taxableSubtotal, gstAmount, total } =
+      calculateTaxTotals(items, { discountType, discountValue });
 
     const dueDate =
       formData.dueDate ||
@@ -109,8 +133,18 @@ const InvoiceComponent = ({
     const date = formData.date || new Date().toISOString().split("T")[0];
     const savedDocument = {
       ...formData,
+      customerId: customer.id,
+      customer: customer.name,
+      customerPhone: customer.phone,
+      customerAddress: formData.customerAddress || customer.address || "",
+      customerGstin: formData.customerGstin || customer.gstin || "",
+      customerState: formData.customerState || customer.state || "",
       items,
       subtotal,
+      discountType,
+      discountValue,
+      discountAmount,
+      taxableSubtotal,
       gstAmount,
       total,
       date,
@@ -125,6 +159,36 @@ const InvoiceComponent = ({
         alert("The invoice total cannot be less than the amount already paid.");
         return;
       }
+    }
+
+    const existingAmountPaid =
+      editingInvoiceId === null
+        ? 0
+        : Number(
+            invoices.find((invoice) => invoice.id === editingInvoiceId)
+              ?.amountPaid || 0,
+          );
+    const outstandingOtherInvoices = getCustomerOutstanding(
+      customer.id,
+      invoices.filter((invoice) => invoice.id !== editingInvoiceId),
+    );
+    const customerAdvance = getCustomerAdvance(customer);
+    const proposedExposure = Math.max(
+      0,
+      outstandingOtherInvoices + Math.max(0, total - existingAmountPaid) -
+        customerAdvance,
+    );
+    if (
+      customer.creditLimit != null &&
+      proposedExposure > Number(customer.creditLimit)
+    ) {
+      const approved = window.confirm(
+        `${customer.name}'s credit limit is ${formatCurrency(customer.creditLimit)}. This invoice would bring credit used to ${formatCurrency(proposedExposure)}. Save it anyway?`,
+      );
+      if (!approved) return;
+    }
+
+    if (editingInvoiceId !== null) {
       setInvoices((currentInvoices) =>
         currentInvoices.map((invoice) => {
           if (invoice.id !== editingInvoiceId) return invoice;
@@ -179,6 +243,21 @@ const InvoiceComponent = ({
 
   const updateFormField = (name, value) => {
     setFormData((current) => ({ ...current, [name]: value }));
+  };
+
+  const handleCustomerSelection = (customerId) => {
+    const customer = customers.find(
+      (candidate) => String(candidate.id) === String(customerId),
+    );
+    setFormData((current) => ({
+      ...current,
+      customerId: customer?.id ?? "",
+      customer: customer?.name ?? "",
+      customerPhone: customer?.phone ?? "",
+      customerAddress: customer?.address ?? "",
+      customerGstin: customer?.gstin ?? "",
+      customerState: customer?.state ?? "",
+    }));
   };
 
   const openPaymentForm = (invoice) => {
@@ -237,8 +316,34 @@ const InvoiceComponent = ({
         };
       }),
     );
+    setCustomers?.((currentCustomers) =>
+      currentCustomers.map((customer) =>
+        String(customer.id) === String(invoice.customerId)
+          ? addInvoicePaymentToCustomer(customer, invoice, payment)
+          : customer,
+      ),
+    );
     setPaymentForm(null);
   };
+
+  const handleDeleteInvoice = (invoice) => {
+    setInvoices((currentInvoices) =>
+      currentInvoices.filter((item) => item.id !== invoice.id),
+    );
+    setCustomers?.((currentCustomers) =>
+      currentCustomers.map((customer) =>
+        String(customer.id) === String(invoice.customerId)
+          ? releaseInvoiceAllocations(customer, invoice.id)
+          : customer,
+      ),
+    );
+  };
+
+  const formatCurrency = (amount) =>
+    `₹${Number(amount || 0).toLocaleString("en-IN", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })}`;
 
   // Customer credit tracking
   const customerCreditMap = {};
@@ -356,9 +461,21 @@ const InvoiceComponent = ({
                 </select>
               </label>
             </div>
+            <CustomerAccountSelect
+              customers={customers}
+              value={formData.customerId}
+              onChange={handleCustomerSelection}
+              onManageCustomers={onOpenCustomers}
+              disabled={Boolean(
+                editingInvoiceId !== null &&
+                  invoices.find((invoice) => invoice.id === editingInvoiceId)
+                    ?.customerId,
+              )}
+            />
             <DocumentDetailsEditor
               formData={formData}
               onChange={updateFormField}
+              customerLocked
             />
             <LineItemsEditor
               items={formData.items}
@@ -373,6 +490,12 @@ const InvoiceComponent = ({
               }
               inventory={inventory}
               listId="invoice-inventory-skus"
+            />
+            <DiscountEditor
+              items={formData.items}
+              discountType={formData.discountType}
+              discountValue={formData.discountValue}
+              onChange={updateFormField}
             />
             <div className="flex gap-2">
               <button
@@ -434,6 +557,20 @@ const InvoiceComponent = ({
                   {Number(invoice.subtotal || 0).toLocaleString("en-IN", {
                     minimumFractionDigits: 2,
                   })}
+                </p>
+                <p className="text-sm text-slate-600">
+                  Discount: -₹
+                  {Number(invoice.discountAmount || 0).toLocaleString("en-IN", {
+                    minimumFractionDigits: 2,
+                  })}
+                </p>
+                <p className="text-sm text-slate-600">
+                  Taxable value: ₹
+                  {Number(
+                    invoice.taxableSubtotal ??
+                      (Number(invoice.subtotal || 0) -
+                        Number(invoice.discountAmount || 0)),
+                  ).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
                 </p>
                 <p className="text-sm text-slate-600">
                   GST: ₹
@@ -593,11 +730,7 @@ const InvoiceComponent = ({
                     Record Payment
                   </button>
                   <button
-                    onClick={() =>
-                      setInvoices(
-                        invoices.filter((item) => item.id !== invoice.id),
-                      )
-                    }
+                    onClick={() => handleDeleteInvoice(invoice)}
                     aria-label={`Delete invoice ${invoice.invoiceNo}`}
                     className="px-4 py-2 bg-red-100 text-red-600 rounded-lg"
                   >

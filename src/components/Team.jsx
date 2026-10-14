@@ -315,10 +315,12 @@ const TeamComponent = () => {
             </label>
             {editingUserId && (
               <label className="space-y-1 text-sm">
-                <span>Phone (optional)</span>
+                <span>Mobile number</span>
                 <input
                   type="tel"
                   autoComplete="tel"
+                  maxLength={40}
+                  required
                   value={formData.phone}
                   onChange={(event) =>
                     setFormData({ ...formData, phone: event.target.value })

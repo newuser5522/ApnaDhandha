@@ -13,11 +13,16 @@ if (!SESSION_SECRET || SESSION_SECRET.length < 32) {
 }
 
 const ROLES = new Set(["Admin", "Manager", "Accountant", "Staff"]);
-const COLLECTIONS = new Set(["inventory", "invoices", "quotations"]);
+const COLLECTIONS = new Set([
+  "inventory",
+  "invoices",
+  "quotations",
+  "customers",
+]);
 const WRITE_PERMISSIONS = {
   Admin: new Set(COLLECTIONS),
   Manager: new Set(COLLECTIONS),
-  Accountant: new Set(["invoices", "quotations"]),
+  Accountant: new Set(["invoices", "quotations", "customers"]),
   Staff: new Set(COLLECTIONS),
 };
 const SESSION_AGE = 8 * 60 * 60 * 1000;
@@ -30,6 +35,13 @@ const normalizeEmail = (email) =>
 
 const isValidEmail = (email) =>
   /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && email.length <= 254;
+
+const isValidPhone = (phone) => {
+  if (typeof phone !== "string" || phone.trim().length > 40) return false;
+  const normalized = phone.trim();
+  const digits = normalized.replace(/\D/g, "");
+  return /^\+?[()\d\s.-]+$/.test(normalized) && digits.length >= 7 && digits.length <= 15;
+};
 
 const isValidPassword = (password) =>
   typeof password === "string" &&
@@ -350,6 +362,10 @@ export function createApp() {
         : "";
     const name =
       typeof request.body?.name === "string" ? request.body.name.trim() : "";
+    const phone =
+      typeof request.body?.phone === "string"
+        ? request.body.phone.trim()
+        : "";
     const email = normalizeEmail(request.body?.email);
     const password = request.body?.password;
     const otp = request.body?.otp;
@@ -358,13 +374,14 @@ export function createApp() {
       shopName.length > 120 ||
       !name ||
       name.length > 120 ||
+      !isValidPhone(phone) ||
       !isValidEmail(email) ||
       !isValidPassword(password) ||
       !consumeOtp(email, "bootstrap", otp)
     ) {
       response.status(400).json({
         error:
-          "Provide your shop name, owner name, valid email, 12+ character password, and the 6-digit OTP.",
+          "Provide your shop name, owner name, mobile number, valid email, 12+ character password, and the 6-digit OTP.",
       });
       return;
     }
@@ -374,7 +391,7 @@ export function createApp() {
       name,
       shopName,
       email,
-      phone: "",
+      phone,
       passwordHash: await bcrypt.hash(password, 12),
       role: "Admin",
       status: "active",
@@ -554,13 +571,14 @@ export function createApp() {
         !token ||
         !name ||
         name.length > 120 ||
+        !isValidPhone(phone) ||
         !isValidPassword(password) ||
         !invitation ||
         !consumeOtp(invitation.email, "invite", otp)
       ) {
         response.status(400).json({
           error:
-            "Enter your name, a strong password, and the 6-digit email verification code.",
+            "Enter your name, mobile number, a strong password, and the 6-digit email verification code.",
         });
         return;
       }
@@ -867,7 +885,7 @@ export function createApp() {
         !["active", "inactive"].includes(status) ||
         !name ||
         name.length > 120 ||
-        phone.length > 40
+        !isValidPhone(phone)
       ) {
         response.status(400).json({ error: "Invalid role or account status." });
         return;
@@ -948,6 +966,24 @@ export function createApp() {
       response
         .status(400)
         .json({ error: "Collection value must be an array." });
+      return;
+    }
+    if (
+      collection === "customers" &&
+      request.body.value.some(
+        (customer) =>
+          !customer ||
+          typeof customer !== "object" ||
+          Array.isArray(customer) ||
+          typeof customer.name !== "string" ||
+          !customer.name.trim() ||
+          customer.name.trim().length > 120 ||
+          !isValidPhone(customer.phone),
+      )
+    ) {
+      response.status(400).json({
+        error: "Every customer must have a name and valid mobile number.",
+      });
       return;
     }
 
